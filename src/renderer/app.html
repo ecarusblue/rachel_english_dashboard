@@ -131,9 +131,16 @@
       <section id="view-settings" hidden>
         <h2 class="page">설정</h2>
         <div class="panel grid2">
-          <label>현황판을 띄울 디스플레이
-            <select id="s-display"></select>
-          </label>
+          <div>
+            <label>현황판을 띄울 디스플레이
+              <select id="s-display"></select>
+            </label>
+            <div class="row tight">
+              <button id="s-identify" class="btn small" type="button">화면 번호 보기</button>
+              <span class="hint inline">누르면 각 모니터에 번호가 3초 동안 나타납니다.</span>
+            </div>
+            <p id="s-display-note" class="hint note-line"></p>
+          </div>
           <label>화면 색상
             <select id="s-theme">
               <option value="system">PC 설정 따르기</option>

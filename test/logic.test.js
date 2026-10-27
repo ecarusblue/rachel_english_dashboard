@@ -142,3 +142,29 @@ test('buildCustom: 날짜 머리 + 글 한 덩어리, 이름 가림은 적용하
   assert.equal(m.dayOff, false);
   assert.deepEqual(m.slots, []);
 });
+
+const D = (id, w, h, label) => ({ id, label, size: { width: w, height: h } });
+
+test('chooseDisplay: 화면이 하나뿐이면 저장된 선택과 상관없이 그 화면(복제 모드)', () => {
+  const only = [D(7, 1920, 1080)];
+  assert.equal(L.chooseDisplay(only, 7, 99).id, 7);
+  assert.equal(L.chooseDisplay(only, 7, null).id, 7);
+  assert.equal(L.chooseDisplay([], 1, null), null);
+});
+
+test('chooseDisplay: 둘 이상이면 저장된 화면, 없으면 기다림(null), 미지정이면 보조 화면', () => {
+  const two = [D(1, 1920, 1080), D(2, 3840, 2160)];
+  assert.equal(L.chooseDisplay(two, 1, 2).id, 2);
+  assert.equal(L.chooseDisplay(two, 1, 1).id, 1);
+  assert.equal(L.chooseDisplay(two, 1, 99), null);
+  assert.equal(L.chooseDisplay(two, 1, null).id, 2);
+  assert.equal(L.chooseDisplay(two, 2, null).id, 1);
+});
+
+test('describeDisplays: 1번/2번 번호, 모니터 이름, 해상도, 주/보조', () => {
+  const list = L.describeDisplays([D(1, 1920, 1080, 'DELL U2412M'), D(2, 3840, 2160, '')], 1);
+  assert.deepEqual(list.map((x) => x.number), [1, 2]);
+  assert.equal(list[0].label, '1번 · DELL U2412M · 1920×1080 · 주 화면');
+  assert.equal(list[1].label, '2번 · 3840×2160 · 보조 화면');
+  assert.equal(list[1].id, 2);
+});
