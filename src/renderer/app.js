@@ -197,7 +197,8 @@ $('save-only').addEventListener('click', async () => {
   say($('editor-msg'), res.persisted ? '저장했습니다.' : '저장했습니다. 이 PC에서는 암호화 저장소를 쓸 수 없어 프로그램을 닫으면 사라집니다.', true);
 });
 
-$('save-view').addEventListener('click', async () => {
+// 입력한 글을 저장하고 현황판에 보여준다(홈의 "시간표 대시보드 현황 보기"와 같은 방식)
+async function showOnBoard() {
   if (!doc.text.trim()) return say($('editor-msg'), '보여줄 글을 입력해 주세요.', false);
   await saveDoc();
   const res = await window.api.openBoard('custom');
@@ -205,7 +206,9 @@ $('save-view').addEventListener('click', async () => {
   say($('editor-msg'), res.waitingDisplay
     ? '저장했습니다. 선택한 디스플레이가 연결되면 현황판이 나타납니다.'
     : '현황판을 열었습니다. 현황판에서 Esc 키를 누르면 이 창이 앞으로 나옵니다.', true);
-});
+}
+$('save-view').addEventListener('click', showOnBoard);
+$('save-view2').addEventListener('click', showOnBoard);
 
 $('clear-custom').addEventListener('click', async () => {
   if (!doc.text && !ctl.hasCustom) return;
