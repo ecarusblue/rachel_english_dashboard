@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; font-src 'self'; script-src 'self'; img-src 'self' data:">
+  <title>Rachel English 현황판</title>
+  <link rel="stylesheet" href="../../node_modules/pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css">
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+  <!-- 로그인 -->
+  <main id="view-login" class="login-wrap" hidden>
+    <form id="login-form" class="login" autocomplete="on">
+      <div class="brand big"><span class="logo">R</span><div><div class="bn">Rachel English</div><div class="bs">현황판</div></div></div>
+      <p class="lead">선생님 계정으로 로그인해 주세요.</p>
+      <label>이메일
+        <input id="email" type="email" autocomplete="username" spellcheck="false" required>
+      </label>
+      <label>비밀번호
+        <input id="password" type="password" autocomplete="current-password" required>
+      </label>
+      <button id="login" class="btn primary wide" type="submit">로그인</button>
+      <p id="login-msg" class="msg" role="status"></p>
+
+      <details id="conn">
+        <summary>연결 설정</summary>
+        <label>프로젝트 URL
+          <input id="c-url" type="url" placeholder="https://xxxx.supabase.co" spellcheck="false" autocomplete="off">
+        </label>
+        <label>공개용 키 (anon / publishable)
+          <input id="c-key" type="password" placeholder="저장된 키 유지(비워 두면 그대로)" spellcheck="false" autocomplete="off">
+        </label>
+        <p class="hint">secret / service_role 키는 사용할 수 없습니다.</p>
+        <button id="c-save" class="btn" type="button">연결 설정 저장</button>
+      </details>
+    </form>
+  </main>
+
+  <!-- 로그인 후: 사이드바 + 본문 -->
+  <div id="shell" class="shell" hidden>
+    <aside class="side">
+      <div class="brand"><span class="logo">R</span><div><div class="bn">Rachel English</div><div class="bs">현황판</div></div></div>
+      <nav aria-label="메뉴">
+        <button class="nav" type="button" data-nav="home">홈</button>
+        <button class="nav" type="button" data-nav="editor">직접 입력</button>
+        <button class="nav" type="button" data-nav="settings">설정</button>
+      </nav>
+      <div class="side-foot">
+        <div id="board-state" class="board-state" hidden>
+          <span class="dot"></span><span id="board-state-text"></span>
+          <button id="close-board" class="side-btn" type="button">현황판 닫기</button>
+        </div>
+        <div id="account" class="account"></div>
+        <button id="logout" class="side-btn" type="button">로그아웃</button>
+        <button id="quit" class="side-btn" type="button">프로그램 종료</button>
+      </div>
+    </aside>
+
+    <div class="content">
+      <!-- 홈 -->
+      <section id="view-home" hidden>
+        <h2 class="page">현황판 <span class="muted">보여줄 화면을 고르세요</span></h2>
+        <div class="choices">
+          <button id="go-live" class="choice primary" type="button">
+            <span class="bt">시간표 대시보드 현황 보기</span>
+            <span class="bs" id="live-sub">불러오는 중…</span>
+          </button>
+          <div class="choice-col">
+            <button id="go-custom" class="choice" type="button">
+              <span class="bt">직접 입력해서 보기</span>
+              <span class="bs" id="custom-sub">글을 적고 정렬과 글자 크기를 정해 현황판으로 보여줍니다.</span>
+            </button>
+            <button id="view-custom" class="btn small" type="button" hidden>저장한 글 바로 보기</button>
+          </div>
+        </div>
+        <p id="wait-note" class="note warn" hidden>선택한 디스플레이가 연결돼 있지 않습니다. 연결되면 현황판이 그 화면에 자동으로 나타납니다.</p>
+        <p id="err-note" class="note warn" hidden></p>
+        <p id="home-msg" class="msg" role="status"></p>
+        <p class="hint tail"><span id="sync-note"></span> 현황판에서 Esc 키를 누르면 이 창이 앞으로 나옵니다.</p>
+      </section>
+
+      <!-- 직접 입력: 글 + 정렬 + 글자 크기 -->
+      <section id="view-editor" hidden>
+        <div class="page-bar">
+          <h2 class="page">직접 입력 <span class="muted">글을 적고 정렬과 글자 크기를 정하세요</span></h2>
+          <div class="actions">
+            <button id="save-only" class="btn" type="button">저장</button>
+            <button id="save-view" class="btn primary" type="button">대시보드 보기</button>
+          </div>
+        </div>
+
+        <div class="panel toolbar" role="toolbar" aria-label="글 서식">
+          <div class="group" role="group" aria-label="정렬">
+            <button class="seg-btn" type="button" data-align="left" aria-pressed="true" title="왼쪽 정렬">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 9h9M3 13h14M3 17h9" /></svg>왼쪽
+            </button>
+            <button class="seg-btn" type="button" data-align="center" aria-pressed="false" title="가운데 정렬">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M5.5 9h9M3 13h14M5.5 17h9" /></svg>가운데
+            </button>
+            <button class="seg-btn" type="button" data-align="right" aria-pressed="false" title="오른쪽 정렬">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M8 9h9M3 13h14M8 17h9" /></svg>오른쪽
+            </button>
+          </div>
+          <div class="group size" role="group" aria-label="글자 크기">
+            <button id="size-dec" class="btn icon" type="button" aria-label="글자 작게" title="글자 작게">−</button>
+            <input id="size" type="range" min="20" max="200" step="2" value="56" aria-label="글자 크기">
+            <button id="size-inc" class="btn icon" type="button" aria-label="글자 크게" title="글자 크게">+</button>
+            <output id="size-val" for="size">56</output>
+          </div>
+        </div>
+
+        <label class="field">현황판에 보여줄 글
+          <textarea id="text" rows="8" maxlength="5000" spellcheck="false" placeholder="예) 오늘은 단어시험이 있습니다.&#10;숙제 노트는 월요일까지 제출해 주세요."></textarea>
+        </label>
+        <div class="under">
+          <span id="count" class="hint">0 / 5000자</span>
+          <button id="clear-custom" class="btn small danger" type="button">글 지우기</button>
+        </div>
+        <p id="editor-msg" class="msg" role="status"></p>
+
+        <h3 class="sub">현황판에서 보이는 모습</h3>
+        <div class="preview" id="preview" aria-label="현황판 미리보기">
+          <div class="pv-top"><span id="pv-date"></span><span id="pv-time"></span></div>
+          <div class="pv-body"><div id="pv-text" class="pv-text"></div></div>
+        </div>
+      </section>
+
+      <!-- 설정 -->
+      <section id="view-settings" hidden>
+        <h2 class="page">설정</h2>
+        <div class="panel grid2">
+          <label>현황판을 띄울 디스플레이
+            <select id="s-display"></select>
+          </label>
+          <label>화면 색상
+            <select id="s-theme">
+              <option value="system">PC 설정 따르기</option>
+              <option value="light">밝게</option>
+              <option value="dark">어둡게</option>
+            </select>
+          </label>
+          <label>학생 이름 표시
+            <select id="s-name">
+              <option value="full">전체 이름</option>
+              <option value="surname">성 + ○○</option>
+              <option value="given">이름만</option>
+              <option value="initial">초성</option>
+            </select>
+          </label>
+          <label>DB 현황 갱신 주기 (초)
+            <input id="s-refresh" type="number" min="15" max="3600" step="5">
+          </label>
+          <label>프로젝트 URL
+            <input id="s-url" type="url" spellcheck="false" autocomplete="off">
+          </label>
+          <label>공개용 키 (anon / publishable)
+            <input id="s-key" type="password" placeholder="저장된 키 유지(비워 두면 그대로)" spellcheck="false" autocomplete="off">
+          </label>
+          <label class="check wide2"><input id="s-auto" type="checkbox"> Windows 시작 시 자동 실행 (설치본에서만 적용)</label>
+        </div>
+        <div class="row">
+          <button id="s-save" class="btn primary" type="button">설정 저장</button>
+          <span id="s-msg" class="msg" role="status"></span>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

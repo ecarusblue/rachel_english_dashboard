@@ -1,0 +1,49 @@
+/* 기존 웹앱(Rachel English 진도표)의 색상 변수와 글꼴을 그대로 쓴다.
+   밝은 테마가 기본이고, PC가 어두운 테마이거나 설정에서 "어둡게"를 고르면 어두운 값으로 바뀐다. */
+:root {
+  --bg: #e9f1f1;
+  --surface: #fbfdfd;
+  --text: #16282b;
+  --muted: #4f6568;
+  --border: #d3dfe0;
+  --accent: #18767d;
+  --accent-soft: #d9eeee;
+  --on-accent: #ffffff;
+  --progress: #5b6f72;
+  --side-bg: #0f3d44;
+  --side-text: #e8f3f3;
+  --side-muted: #a8c8ca;
+  --side-active: #175159;
+  --side-line: rgba(255, 255, 255, .2);
+  --good: #15803d;
+  --warn: #b45309;
+  --warn-soft: #fff4e0;
+  --bad: #b91c1c;
+  --bad-soft: #fdecec;
+  --orange: #f4a27a;      /* 사이드바의 선택 표시색 */
+  --warn-on-side: #f6c36a; /* 어두운 면 위의 경고색 */
+  --radius: 10px;
+  --font: "Pretendard Variable", Pretendard, system-ui, -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1516;
+    --surface: #152123;
+    --text: #e5eeee;
+    --muted: #96b0b3;
+    --border: #25393c;
+    --accent: #5bc4cb;
+    --accent-soft: #16343a;
+    --on-accent: #062428;
+    --progress: #8fa8ab;
+    --side-bg: #081012;
+    --side-text: #e5eeee;
+    --side-muted: #8ea9ac;
+    --side-active: #1b3b40;
+    --good: #4ade80;
+    --warn: #fbbf24;
+    --warn-soft: #3a2f17;
+    --bad: #f87171;
+    --bad-soft: #3a1d1f;
+  }
+}
