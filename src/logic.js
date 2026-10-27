@@ -2,6 +2,12 @@
 // 화면 계산 로직. Electron/네트워크에 의존하지 않는 순수 함수만 둔다.
 // weekday 규약: schedule_slots.weekday, progress.weekdays 는 JS Date#getDay() 와 같다(0=일요일).
 // 실제 데이터(시간표 1~4, 진도 {1,2,3,4})가 월~목으로 들어 있어 이 해석과 맞는다.
+//
+// 현황(DB)과 직접 입력은 같은 "대시보드 모델"로 모은 뒤 한 화면(board)에서 그린다.
+//   { dateText, weekday, dayOff, hours:{start,end}|null,
+//     slots:[{ label, start, end, students:[{ name, books:[book] }] }] }
+//   book = { title, unitLabel, total, current, from, to, pct, recPct, progressText, range, computed, rationale }
+// 타임의 지금/지난/예정 상태는 화면이 자기 시계로 계산한다(모델에는 넣지 않는다).
 
 const REC_EXCLUDED_STATUS = '거절';
 
@@ -14,8 +20,12 @@ function dateKey(d) {
 
 const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토'];
 
-function dateLabel(d) {
-  return `${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAY_KO[d.getDay()]})`;
+function dateText(d) {
+  return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+}
+
+function weekdayText(d) {
+  return `${WEEKDAY_KO[d.getDay()]}요일`;
 }
 
 function toMinutes(t) {
@@ -26,16 +36,6 @@ function toMinutes(t) {
 
 function hhmm(t) {
   return t ? String(t).slice(0, 5) : '';
-}
-
-function slotState(slot, now) {
-  const s = toMinutes(slot.start_time);
-  const e = toMinutes(slot.end_time);
-  if (s == null || e == null) return 'upcoming';
-  const cur = now.getHours() * 60 + now.getMinutes();
-  if (cur >= e) return 'past';
-  if (cur >= s) return 'now';
-  return 'upcoming';
 }
 
 // 한글 초성
@@ -68,22 +68,35 @@ function fmtNum(n) {
   return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
 
+function structureItems(book) {
+  return book && book.structure && Array.isArray(book.structure.items) && book.structure.items.length
+    ? book.structure.items
+    : null;
+}
+
 // 교재 단원 표기. structure.items 가 있으면 그 이름, 없으면 `${unit_label} N`.
 // 기존 웹앱의 'Unit 2 › Part B' 하위 항목 표기는 아직 반영하지 않았다(app.js 와 대조 필요).
 function unitText(book, unit) {
   const n = Number(unit);
-  const items = book && book.structure && Array.isArray(book.structure.items) ? book.structure.items : null;
-  if (items && items.length) {
+  const items = structureItems(book);
+  if (items) {
     const item = items[Math.max(0, Math.ceil(n) - 1)];
     if (item && item.name) return String(item.name);
   }
   return `${(book && book.unit_label) || 'Unit'} ${fmtNum(n)}`;
 }
 
+// 범위 표기: 'Unit 13–14' (단원 이름은 한 번만), 항목형 교재는 '26-50 ~ 51-75'
 function rangeText(book, from, to) {
-  const a = unitText(book, from);
-  const b = unitText(book, to);
-  return Number(from) === Number(to) || a === b ? a : `${a} – ${b}`;
+  const f = Number(from);
+  const t = Number(to);
+  if (structureItems(book)) {
+    const a = unitText(book, f);
+    const b = unitText(book, t);
+    return a === b ? a : `${a} ~ ${b}`;
+  }
+  const label = (book && book.unit_label) || 'Unit';
+  return f === t ? `${label} ${fmtNum(f)}` : `${label} ${fmtNum(f)}–${fmtNum(t)}`;
 }
 
 // 오늘자 추천: 거절 제외, target_date 가 오늘인 것 중 가장 최근(created_at) 것.
@@ -109,7 +122,50 @@ function computeRange(progress) {
   return { from, to: from + span - 1 };
 }
 
-function buildBoard({ students, textbooks, progress, recommendations, slots }, now, nameMode) {
+const clampPct = (v) => Math.max(0, Math.min(100, v));
+
+// book: { title, unit_label, total_units, structure? }  (DB 교재 행 모양)
+function makeBook(book, current, from, to, computed, rationale) {
+  const total = Number(book.total_units) || 0;
+  const cur = Number(current) || 0;
+  const f = Number(from);
+  const t = Number(to);
+  return {
+    title: book.title,
+    unitLabel: book.unit_label || 'Unit',
+    total,
+    current: cur,
+    from: f,
+    to: t,
+    pct: total > 0 ? clampPct((cur / total) * 100) : 0,
+    recPct: total > 0 ? clampPct((Math.max(t - cur, 0) / total) * 100) : 0,
+    progressText: `${fmtNum(cur)}/${total}`,
+    range: rangeText(book, f, t),
+    computed: !!computed,
+    rationale: rationale || null,
+  };
+}
+
+function hoursOf(slots) {
+  const starts = slots.map((s) => toMinutes(s.start)).filter((x) => x != null);
+  const ends = slots.map((s) => toMinutes(s.end)).filter((x) => x != null);
+  if (!starts.length || !ends.length) return null;
+  const f = (x) => `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`;
+  return { start: f(Math.min(...starts)), end: f(Math.max(...ends)) };
+}
+
+function shell(now, slots) {
+  return {
+    dateText: dateText(now),
+    weekday: weekdayText(now),
+    dayOff: slots.length === 0,
+    hours: hoursOf(slots),
+    slots,
+  };
+}
+
+// ---- 현황(DB) → 대시보드 모델 ----
+function buildDashboard({ students, textbooks, progress, recommendations, slots }, now, nameMode) {
   const todayKey = dateKey(now);
   const wd = now.getDay();
   const stuById = new Map(students.filter((s) => s.active !== false).map((s) => [s.id, s]));
@@ -119,73 +175,73 @@ function buildBoard({ students, textbooks, progress, recommendations, slots }, n
     .filter((s) => s.weekday === wd)
     .sort((a, b) => a.slot_order - b.slot_order);
 
-  const slotRows = todaySlots.map((s) => ({
+  const out = todaySlots.map((s) => ({
     label: s.label,
     start: hhmm(s.start_time),
     end: hhmm(s.end_time),
-    state: slotState(s, now),
     students: (s.student_ids || [])
       .map((id) => stuById.get(id))
       .filter(Boolean)
-      .map((st) => maskName(st.name, nameMode)),
+      .map((st) => {
+        const books = [];
+        for (const p of progress) {
+          if (p.student_id !== st.id) continue;
+          const days = p.weekdays || [];
+          if (days.length && !days.includes(wd)) continue; // 요일 미지정 교재는 매일 포함
+          const book = bookById.get(p.textbook_id);
+          if (!book) continue;
+          const rec = pickRecommendation(recommendations, st.id, p.textbook_id, todayKey);
+          if (rec) {
+            books.push(makeBook(book, p.current_unit, rec.from_unit, rec.to_unit, false, rec.rationale));
+          } else {
+            const c = computeRange(p);
+            books.push(makeBook(book, p.current_unit, c.from, c.to, true, null));
+          }
+        }
+        return { name: maskName(st.name, nameMode), books };
+      }),
   }));
 
-  // 오늘 수업이 있는 학생(시간표 등장 순서대로, 중복 제거)
-  const order = [];
-  for (const s of todaySlots) {
-    for (const id of s.student_ids || []) {
-      if (stuById.has(id) && !order.includes(id)) order.push(id);
-    }
-  }
+  return shell(now, out);
+}
 
-  const cards = [];
-  for (const id of order) {
-    const st = stuById.get(id);
-    const mine = progress.filter((p) => {
-      if (p.student_id !== id) return false;
-      const days = p.weekdays || [];
-      return days.length === 0 || days.includes(wd); // 요일 미지정 교재는 매일 포함
-    });
-    for (const p of mine) {
-      const book = bookById.get(p.textbook_id);
-      if (!book) continue;
-      const rec = pickRecommendation(recommendations, id, p.textbook_id, todayKey);
-      let range = null;
-      let computed = false;
-      let rationale = null;
-      if (rec) {
-        range = rangeText(book, rec.from_unit, rec.to_unit);
-        rationale = rec.rationale || null;
-      } else {
-        const c = computeRange(p);
-        range = rangeText(book, c.from, c.to);
-        computed = true;
-      }
-      const total = Number(book.total_units) || 0;
-      const current = Number(p.current_unit) || 0;
-      cards.push({
-        name: maskName(st.name, nameMode),
-        book: book.title,
-        current,
-        total,
-        pct: total > 0 ? Math.max(0, Math.min(100, (current / total) * 100)) : 0,
-        progressText: `${fmtNum(current)} / ${total}`,
-        range,
-        computed,
-        rationale,
-      });
-    }
-  }
+// ---- 직접 입력 (글만 적고 정렬·글자 크기를 정한다) ----
+// custom = { text, align: 'left'|'center'|'right', size }   size = 1080p 기준 글자 크기(px)
+const ALIGNS = ['left', 'center', 'right'];
+const LIMITS = { text: 5000, sizeMin: 20, sizeMax: 200, sizeDefault: 56 };
 
+function normalizeCustom(input) {
+  const i = input && typeof input === 'object' ? input : {};
+  const size = Number(i.size);
   return {
-    dateLabel: dateLabel(now),
-    dayOff: todaySlots.length === 0,
-    slots: slotRows,
-    cards,
+    text: String(i.text == null ? '' : i.text).replace(/\r\n?/g, '\n').slice(0, LIMITS.text),
+    align: ALIGNS.includes(i.align) ? i.align : 'left',
+    size: Number.isFinite(size)
+      ? Math.min(LIMITS.sizeMax, Math.max(LIMITS.sizeMin, Math.round(size)))
+      : LIMITS.sizeDefault,
+  };
+}
+
+const hasCustomText = (c) => !!(c && String(c.text || '').trim());
+
+// 글 모델: 현황 모델과 같은 머리(날짜·시각)를 쓰되 본문은 글 한 덩어리
+function buildCustom(custom, now) {
+  const c = normalizeCustom(custom);
+  return {
+    kind: 'text',
+    dateText: dateText(now),
+    weekday: weekdayText(now),
+    dayOff: false,
+    hours: null,
+    slots: [],
+    text: c.text,
+    align: c.align,
+    size: c.size,
   };
 }
 
 module.exports = {
-  dateKey, dateLabel, slotState, maskName, unitText, rangeText,
-  pickRecommendation, computeRange, buildBoard, WEEKDAY_KO,
+  dateKey, dateText, weekdayText, maskName, unitText, rangeText,
+  pickRecommendation, computeRange, makeBook,
+  buildDashboard, buildCustom, normalizeCustom, hasCustomText, WEEKDAY_KO, LIMITS, ALIGNS,
 };

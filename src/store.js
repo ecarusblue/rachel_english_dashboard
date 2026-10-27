@@ -4,6 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { app, safeStorage } = require('electron');
+const { normalizeCustom } = require('./logic');
 
 const NAME_MODES = ['full', 'surname', 'given', 'initial'];
 
@@ -13,8 +14,11 @@ const DEFAULTS = {
   displayId: null, // 현황판을 띄울 디스플레이 id (screen.getAllDisplays()[].id)
   refreshSec: 60,
   nameMode: 'full',
+  theme: 'system', // 화면 색상: system(PC 설정 따름) | light | dark
   autoLaunch: false, // 개인 PC → 기본 꺼짐
 };
+
+const THEMES = ['system', 'light', 'dark'];
 
 function userFile(name) {
   return path.join(app.getPath('userData'), name);
@@ -51,6 +55,7 @@ function sanitize(input) {
   s.supabaseKey = String(s.supabaseKey || '').trim();
   s.refreshSec = Math.min(3600, Math.max(15, Math.round(Number(s.refreshSec) || DEFAULTS.refreshSec)));
   if (!NAME_MODES.includes(s.nameMode)) s.nameMode = 'full';
+  if (!THEMES.includes(s.theme)) s.theme = 'system';
   s.autoLaunch = !!s.autoLaunch;
   s.displayId = s.displayId == null || s.displayId === '' ? null : Number(s.displayId);
   if (Number.isNaN(s.displayId)) s.displayId = null;
@@ -125,6 +130,24 @@ function secureRemove(key) {
   }
 }
 
+// 직접 입력한 대시보드(학생 이름 포함)도 암호화할 수 있을 때만 디스크에 둔다.
+function loadCustom() {
+  try {
+    const raw = secureGet('custom');
+    return raw ? normalizeCustom(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCustom(custom) {
+  return secureSet('custom', JSON.stringify(custom));
+}
+
+function clearCustom() {
+  secureRemove('custom');
+}
+
 // supabase-js 가 세션을 저장하는 용도의 storage 어댑터
 const authStorage = {
   getItem: (k) => secureGet(`auth-${k}`),
@@ -138,4 +161,5 @@ module.exports = {
   NAME_MODES, DEFAULTS, sanitize, validate, isSecretKey,
   loadSettings, saveSettings,
   secureAvailable, secureGet, secureSet, secureRemove, authStorage,
+  loadCustom, saveCustom, clearCustom,
 };

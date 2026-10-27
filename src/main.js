@@ -1,29 +1,44 @@
 'use strict';
+const fs = require('fs');
 const path = require('path');
 const {
-  app, BrowserWindow, Tray, Menu, screen, ipcMain, powerSaveBlocker, nativeImage,
+  app, BrowserWindow, Tray, Menu, screen, ipcMain, powerSaveBlocker, nativeImage, nativeTheme,
 } = require('electron');
 const store = require('./store');
+const L = require('./logic');
 const { makeClient, fetchAll } = require('./data');
-const { buildBoard, dateKey } = require('./logic');
 
 const PRELOAD = path.join(__dirname, 'preload.js');
 const RETRY_MS = 15000; // 갱신 실패 시 재시도 간격
-const TICK_MS = 30000; // 진행 중 타임 강조·자정 롤오버 점검
-// 개발용: DASHBOARD_WINDOWED=1 이면 전체 화면 대신 일반 창, DASHBOARD_DEMO=1 이면 가짜 데이터(DB·로그인 없이)
-const WINDOWED = process.env.DASHBOARD_WINDOWED === '1';
+const TICK_MS = 30000; // 날짜 바뀜 점검과 화면 갱신
+
+// ---- 개발용 환경변수 (실제 사용에는 필요 없음) ----
+// DASHBOARD_WINDOWED=1  현황판을 전체 화면 대신 일반 창으로
+// DASHBOARD_DEMO=1      DB·로그인 없이 가짜 데이터로
+// DASHBOARD_FAKE_NOW    'YYYY-MM-DDTHH:mm' 로 현재 시각 고정
+// DASHBOARD_SHOT=<폴더> 화면별 스크린샷을 저장하고 종료
+const SHOT_DIR = process.env.DASHBOARD_SHOT || '';
+const WINDOWED = process.env.DASHBOARD_WINDOWED === '1' || !!SHOT_DIR;
 const DEMO = process.env.DASHBOARD_DEMO === '1';
+const FAKE_NOW = process.env.DASHBOARD_FAKE_NOW || '';
+
+const nowDate = () => (FAKE_NOW ? new Date(FAKE_NOW) : new Date());
+
+// 개발용 실행은 실제 앱 데이터(저장된 로그인·직접 입력 내용)와 섞이지 않게 임시 폴더를 쓴다.
+if (DEMO || SHOT_DIR) app.setPath('userData', path.join(require('os').tmpdir(), 'rachel-dashboard-dev'));
 
 let settings;
 let client = null;
-let board = null;
-let settingsWin = null;
+let control = null; // 로그인·홈·직접 입력 창
+let board = null; // 전체 화면 현황판
+let boardSource = null; // null(닫힘) | 'live'(현황) | 'custom'(직접 입력)
 let tray = null;
 let blockerId = null;
 let quitting = false;
 
-let raw = null; // 마지막으로 성공한 원본 데이터
+let raw = null; // 마지막으로 성공한 DB 데이터
 let rawDate = null; // raw 를 가져온 날짜(dateKey)
+let custom = null; // 직접 입력한 대시보드(정규화된 값)
 const status = {
   configured: false,
   loggedIn: false,
@@ -31,22 +46,55 @@ const status = {
   lastOk: null,
   error: null,
   waitingDisplay: false,
-  noSecureStore: false,
 };
 let fetchTimer = null;
 let fetching = false;
 
-// ---------- 상태 전송 ----------
-function snapshot() {
-  const model = raw ? buildBoard(raw, new Date(), settings.nameMode) : null;
-  return { model, status: { ...status, now: Date.now() } };
+// ---------- 화면에 보낼 상태 ----------
+function dashboardFor(source, now) {
+  if (source === 'custom') return L.hasCustomText(custom) ? L.buildCustom(custom, now) : null;
+  if (source === 'live') return raw ? L.buildDashboard(raw, now, settings.nameMode) : null;
+  return null;
+}
+
+function boardSnapshot() {
+  const now = nowDate();
+  return { source: boardSource, dashboard: dashboardFor(boardSource, now), status: { ...status }, serverNow: now.getTime() };
+}
+
+function displayLabel() {
+  const d = screen.getAllDisplays().find((x) => x.id === settings.displayId);
+  return d ? `${d.size.width}×${d.size.height}` : null;
+}
+
+function controlSnapshot() {
+  const live = dashboardFor('live', nowDate());
+  const { supabaseKey, ...publicSettings } = settings;
+  return {
+    status: { ...status },
+    settings: { ...publicSettings, hasKey: !!supabaseKey },
+    boardSource,
+    boardOpen: !!board,
+    displayLabel: displayLabel(),
+    live: live
+      ? {
+          dayOff: live.dayOff,
+          hours: live.hours,
+          students: new Set(live.slots.flatMap((s) => s.students.map((x) => x.name))).size,
+        }
+      : null,
+    hasCustom: L.hasCustomText(custom),
+    secureStore: store.secureAvailable(),
+    demo: DEMO,
+  };
 }
 
 function pushState() {
-  if (board && !board.isDestroyed()) board.webContents.send('state:update', snapshot());
+  if (board && !board.isDestroyed()) board.webContents.send('board:update', boardSnapshot());
+  if (control && !control.isDestroyed()) control.webContents.send('control:update', controlSnapshot());
 }
 
-// ---------- 데이터 갱신 ----------
+// ---------- DB 데이터 갱신 ----------
 function scheduleFetch(ms) {
   clearTimeout(fetchTimer);
   fetchTimer = setTimeout(refresh, ms);
@@ -58,10 +106,9 @@ async function refresh() {
   if (fetching) return;
   fetching = true;
   try {
-    const now = new Date();
-    const data = await fetchAll(client, now);
-    raw = data;
-    rawDate = dateKey(now);
+    const now = nowDate();
+    raw = await fetchAll(client, now);
+    rawDate = L.dateKey(now);
     status.lastOk = now.toISOString();
     status.error = null;
     store.secureSet('cache', JSON.stringify({ raw, rawDate, lastOk: status.lastOk }));
@@ -131,43 +178,79 @@ function lockDown(win) {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
 }
 
+const webPrefs = { preload: PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false };
+
+// 창이 뜨는 순간 번쩍이지 않도록 웹앱 테마의 바탕색을 먼저 칠한다
+const bgColor = () => (nativeTheme.shouldUseDarkColors ? '#0d1516' : '#e9f1f1');
+
+// 현황판이 열려 있는 동안만 화면 꺼짐·절전을 막는다(P-1)
+function syncBlocker() {
+  const want = !!board && !board.isDestroyed();
+  if (want && blockerId == null) blockerId = powerSaveBlocker.start('prevent-display-sleep');
+  if (!want && blockerId != null) {
+    powerSaveBlocker.stop(blockerId);
+    blockerId = null;
+  }
+}
+
+function destroyBoard() {
+  if (board && !board.isDestroyed()) {
+    const b = board;
+    board = null;
+    b.destroy();
+  }
+  board = null;
+}
+
 function placeBoard() {
+  if (!boardSource) {
+    destroyBoard();
+    status.waitingDisplay = false;
+    syncBlocker();
+    return;
+  }
   const target = pickDisplay();
   if (!target) {
     status.waitingDisplay = true;
-    if (board && !board.isDestroyed()) {
-      board.destroy();
-      board = null;
-    }
+    destroyBoard();
+    syncBlocker();
     return;
   }
   status.waitingDisplay = false;
 
   if (!board || board.isDestroyed()) {
+    const size = SHOT_DIR ? { w: 1440, h: 810 } : { w: 1280, h: 720 };
     board = new BrowserWindow({
       x: target.bounds.x,
       y: target.bounds.y,
-      width: WINDOWED ? 1280 : target.bounds.width,
-      height: WINDOWED ? 720 : target.bounds.height,
+      width: WINDOWED ? size.w : target.bounds.width,
+      height: WINDOWED ? size.h : target.bounds.height,
+      useContentSize: true,
       frame: WINDOWED,
       show: false,
       skipTaskbar: !WINDOWED,
-      backgroundColor: '#0b0f14',
-      title: '공부방 진도 현황판',
-      webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false },
+      backgroundColor: bgColor(),
+      title: '공부방 현황판',
+      webPreferences: webPrefs,
     });
     lockDown(board);
+    const mine = board;
     board.on('closed', () => {
-      board = null;
+      if (board === mine) {
+        board = null;
+        boardSource = null; // 창을 직접 닫은 경우
+        syncBlocker();
+        pushState();
+      }
     });
     board.webContents.on('before-input-event', (_e, input) => {
       if (input.type !== 'keyDown') return;
-      if (input.key === 'Escape') openSettings();
-      if (input.key === 'F11') board.setFullScreen(!board.isFullScreen());
+      if (input.key === 'Escape') openControl(); // 홈 창을 앞으로
+      if (input.key === 'F11') mine.setFullScreen(!mine.isFullScreen());
     });
     board.once('ready-to-show', () => {
-      if (!WINDOWED) board.setFullScreen(true);
-      board.showInactive(); // PC 본 화면 작업의 포커스를 가져가지 않는다(F-7)
+      if (!WINDOWED) mine.setFullScreen(true);
+      mine.showInactive(); // PC 본 화면 작업의 포커스를 가져가지 않는다(F-7)
       pushState();
     });
     board.loadFile(path.join(__dirname, 'renderer', 'board.html'));
@@ -176,31 +259,53 @@ function placeBoard() {
     board.setBounds(target.bounds);
     board.setFullScreen(true);
   }
+  syncBlocker();
 }
 
-function openSettings() {
-  if (settingsWin && !settingsWin.isDestroyed()) {
-    settingsWin.show();
-    settingsWin.focus();
+function openBoardSource(source) {
+  if (source !== 'live' && source !== 'custom') return { ok: false, error: '알 수 없는 보기입니다.' };
+  if (!status.loggedIn) return { ok: false, error: '먼저 로그인해 주세요.' };
+  if (source === 'custom' && !L.hasCustomText(custom)) return { ok: false, error: '직접 입력한 글이 없습니다.' };
+  boardSource = source;
+  placeBoard();
+  pushState();
+  return { ok: true, waitingDisplay: status.waitingDisplay };
+}
+
+function closeBoard() {
+  boardSource = null;
+  placeBoard();
+  pushState();
+}
+
+function openControl() {
+  if (control && !control.isDestroyed()) {
+    if (control.isMinimized()) control.restore();
+    control.show();
+    control.focus();
     return;
   }
-  const primary = screen.getPrimaryDisplay().workArea;
-  settingsWin = new BrowserWindow({
-    width: 560,
-    height: 720,
-    x: primary.x + Math.round((primary.width - 560) / 2),
-    y: primary.y + Math.round((primary.height - 720) / 2),
-    title: '현황판 설정',
+  const area = screen.getPrimaryDisplay().workArea;
+  const w = 1000;
+  const h = 800;
+  control = new BrowserWindow({
+    width: w,
+    height: h,
+    x: area.x + Math.round((area.width - w) / 2),
+    y: area.y + Math.round((area.height - h) / 2),
+    minWidth: 760,
+    minHeight: 600,
+    title: '공부방 현황판',
     autoHideMenuBar: true,
-    backgroundColor: '#11161d',
-    webPreferences: { preload: PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false },
+    backgroundColor: bgColor(),
+    webPreferences: webPrefs,
   });
-  settingsWin.setMenu(null);
-  lockDown(settingsWin);
-  settingsWin.on('closed', () => {
-    settingsWin = null;
+  control.setMenu(null);
+  lockDown(control);
+  control.on('closed', () => {
+    control = null;
   });
-  settingsWin.loadFile(path.join(__dirname, 'renderer', 'settings.html'));
+  control.loadFile(path.join(__dirname, 'renderer', 'app.html'));
 }
 
 function trayIcon() {
@@ -209,16 +314,16 @@ function trayIcon() {
 
 function createTray() {
   tray = new Tray(trayIcon());
-  tray.setToolTip('공부방 진도 현황판');
-  const menu = Menu.buildFromTemplate([
-    { label: '현황판 보이기', click: () => placeBoard() },
-    { label: '현황판 숨기기', click: () => board && !board.isDestroyed() && board.hide() },
-    { label: '설정', click: () => openSettings() },
-    { type: 'separator' },
-    { label: '종료', click: () => app.quit() },
-  ]);
-  tray.setContextMenu(menu);
-  tray.on('double-click', () => openSettings());
+  tray.setToolTip('공부방 현황판');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: '홈 열기', click: () => openControl() },
+      { label: '현황판 닫기', click: () => closeBoard() },
+      { type: 'separator' },
+      { label: '종료', click: () => app.quit() },
+    ])
+  );
+  tray.on('double-click', () => openControl());
 }
 
 function applyAutoLaunch() {
@@ -229,8 +334,8 @@ function applyAutoLaunch() {
 
 // ---------- IPC ----------
 function registerIpc() {
-  ipcMain.handle('state:get', () => snapshot());
-  ipcMain.handle('settings:get', () => ({ ...settings, hasKey: !!settings.supabaseKey, status: { ...status } }));
+  ipcMain.handle('board:get', () => boardSnapshot());
+  ipcMain.handle('control:get', () => controlSnapshot());
 
   ipcMain.handle('settings:save', async (_e, input) => {
     const next = store.sanitize({ ...settings, ...input });
@@ -241,6 +346,7 @@ function registerIpc() {
     const connectionChanged = next.supabaseUrl !== settings.supabaseUrl || next.supabaseKey !== settings.supabaseKey;
     settings = next;
     store.saveSettings(settings);
+    nativeTheme.themeSource = settings.theme;
     applyAutoLaunch();
     placeBoard();
     if (connectionChanged) await initClient();
@@ -269,6 +375,7 @@ function registerIpc() {
   });
 
   ipcMain.handle('auth:logout', async () => {
+    closeBoard();
     if (client) await client.auth.signOut();
     raw = null;
     rawDate = null;
@@ -279,63 +386,123 @@ function registerIpc() {
     return { ok: true };
   });
 
-  ipcMain.handle('settings:close', () => {
-    if (settingsWin && !settingsWin.isDestroyed()) settingsWin.close();
+  ipcMain.handle('board:open', (_e, source) => openBoardSource(source));
+  ipcMain.handle('board:close', () => {
+    closeBoard();
+    return { ok: true };
   });
+
+  ipcMain.handle('custom:get', () => L.normalizeCustom(custom));
+  ipcMain.handle('custom:save', (_e, input) => {
+    custom = L.normalizeCustom(input);
+    const persisted = store.saveCustom(custom); // 암호화 저장소가 없으면 이번 실행에서만 유지
+    pushState();
+    return { ok: true, persisted, custom };
+  });
+  ipcMain.handle('custom:clear', () => {
+    custom = null;
+    store.clearCustom();
+    if (boardSource === 'custom') closeBoard();
+    else pushState();
+    return { ok: true };
+  });
+
   ipcMain.handle('app:quit', () => app.quit());
+}
+
+// ---------- 개발용 스크린샷 ----------
+const SAMPLE_TEXT = '이번 주 안내\n\n10월 30일(금) 단어시험이 있습니다.\n숙제 노트는 월요일까지 제출해 주세요.\n\n수업 시작 전에 자리에 앉아 교재를 펴 주세요.';
+
+async function devShots() {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const cap = async (win, name) => {
+    const img = await win.webContents.capturePage();
+    fs.writeFileSync(path.join(SHOT_DIR, `${name}.png`), img.toPNG());
+  };
+  const click = (win, sel) => win.webContents.executeJavaScript(`document.querySelector(${JSON.stringify(sel)}).click()`);
+  try {
+    fs.mkdirSync(SHOT_DIR, { recursive: true });
+    await wait(3500);
+    if (!status.loggedIn) {
+      await cap(control, '0-login');
+    } else {
+      const js = (win, code) => win.webContents.executeJavaScript(code);
+      await cap(control, '1-home');
+      await click(control, '#go-custom');
+      await wait(700);
+      await js(control, `(() => { const t = document.getElementById('text'); t.value = ${JSON.stringify(SAMPLE_TEXT)}; t.dispatchEvent(new Event('input')); })()`);
+      await click(control, '[data-align="center"]');
+      await js(control, "(() => { const r = document.getElementById('size'); r.value = '72'; r.dispatchEvent(new Event('input')); })()");
+      await wait(800);
+      await cap(control, '2-editor');
+      await click(control, '#save-view');
+      await wait(3500);
+      await cap(board, '3-board-custom');
+      openBoardSource('live');
+      await wait(2500);
+      await cap(board, '4-board-live');
+      nativeTheme.themeSource = 'dark'; // 같은 화면을 어두운 테마로
+      await wait(1500);
+      await cap(board, '5-board-live-dark');
+      await cap(control, '6-editor-dark');
+      openBoardSource('custom');
+      await wait(2000);
+      await cap(board, '7-board-custom-dark');
+      await click(control, '[data-nav="home"]');
+      await wait(700);
+      await cap(control, '8-home-dark');
+      nativeTheme.themeSource = 'light';
+      await wait(1200);
+      await cap(control, '9-home-light-open');
+    }
+  } catch (e) {
+    fs.appendFileSync(path.join(SHOT_DIR, 'error.log'), `${e && e.stack}\n`);
+  } finally {
+    app.quit();
+  }
 }
 
 // ---------- 시작 ----------
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => openSettings());
+  app.on('second-instance', () => openControl());
 
   app.whenReady().then(async () => {
     settings = store.loadSettings();
-    status.noSecureStore = !store.secureAvailable();
+    nativeTheme.themeSource = settings.theme;
+    custom = store.loadCustom();
     loadCache();
     registerIpc();
     createTray();
-    blockerId = powerSaveBlocker.start('prevent-display-sleep'); // P-1
     applyAutoLaunch();
 
-    placeBoard();
     screen.on('display-added', placeBoard);
     screen.on('display-removed', placeBoard);
     screen.on('display-metrics-changed', placeBoard);
 
+    openControl();
     if (DEMO) {
-      raw = require('./demo-data').makeDemo(new Date());
+      raw = require('./demo-data').makeDemo(nowDate());
       status.configured = true;
       status.loggedIn = true;
-      status.lastOk = new Date().toISOString();
+      status.email = 'demo@example.com';
+      status.lastOk = nowDate().toISOString();
       pushState();
     } else {
       await initClient();
-      if (!status.configured || !status.loggedIn) openSettings();
     }
 
-    // 개발용: DASHBOARD_SHOT=<png 경로> 이면 잠시 뒤 현황판 화면을 저장하고 종료한다.
-    if (process.env.DASHBOARD_SHOT) {
-      setTimeout(async () => {
-        try {
-          const img = await board.webContents.capturePage();
-          require('fs').writeFileSync(process.env.DASHBOARD_SHOT, img.toPNG());
-        } finally {
-          app.quit();
-        }
-      }, 4000);
-    }
+    if (SHOT_DIR) devShots();
 
     setInterval(() => {
       // 날짜가 바뀌면 오늘 기준으로 다시 읽고, 아니면 화면만 다시 계산한다(N-3)
-      if (!DEMO && status.loggedIn && rawDate && rawDate !== dateKey(new Date())) refresh();
+      if (!DEMO && status.loggedIn && rawDate && rawDate !== L.dateKey(nowDate())) refresh();
       else pushState();
     }, TICK_MS);
   });
 
-  // 설정 창을 닫아도 현황판은 계속 떠 있어야 한다.
+  // 홈 창을 닫아도 현황판과 트레이는 계속 살아 있다.
   app.on('window-all-closed', () => {
     if (quitting) app.quit();
   });

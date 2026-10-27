@@ -6,17 +6,10 @@ const L = require('../src/logic');
 // 2026-10-27 은 화요일(getDay()=2)
 const NOW = new Date(2026, 9, 27, 15, 45);
 
-test('dateKey / dateLabel', () => {
+test('날짜 표기', () => {
   assert.equal(L.dateKey(NOW), '2026-10-27');
-  assert.equal(L.dateLabel(NOW), '10월 27일 (화)');
-});
-
-test('slotState 진행 중/지난/예정', () => {
-  const mk = (s, e) => ({ start_time: s, end_time: e });
-  assert.equal(L.slotState(mk('14:30:00', '15:30:00'), NOW), 'past');
-  assert.equal(L.slotState(mk('15:30:00', '16:30:00'), NOW), 'now');
-  assert.equal(L.slotState(mk('16:30:00', '17:30:00'), NOW), 'upcoming');
-  assert.equal(L.slotState({}, NOW), 'upcoming');
+  assert.equal(L.dateText(NOW), '10월 27일');
+  assert.equal(L.weekdayText(NOW), '화요일');
 });
 
 test('maskName 가림 방식', () => {
@@ -27,14 +20,16 @@ test('maskName 가림 방식', () => {
   assert.equal(L.maskName('김하늘', 'initial'), 'ㄱㅎㄴ');
 });
 
-test('unitText: structure.items 이름 / 기본 라벨 / 0.5 단위', () => {
+test('unitText / rangeText: 단원 이름은 한 번만, 항목형 교재는 이름 범위, 0.5 단위', () => {
   const plain = { unit_label: 'Unit' };
   assert.equal(L.unitText(plain, 13), 'Unit 13');
   assert.equal(L.unitText(plain, 2.5), 'Unit 2.5');
-  const sw = { unit_label: 'Sight Words', structure: { items: [{ name: '1-25' }, { name: '26-50' }] } };
-  assert.equal(L.unitText(sw, 2), '26-50');
-  assert.equal(L.rangeText(plain, 13, 14), 'Unit 13 – Unit 14');
+  assert.equal(L.rangeText(plain, 13, 14), 'Unit 13–14');
   assert.equal(L.rangeText(plain, 5, 5), 'Unit 5');
+  const sw = { unit_label: 'Sight Words', structure: { items: [{ name: '1-25' }, { name: '26-50' }, { name: '51-75' }] } };
+  assert.equal(L.unitText(sw, 2), '26-50');
+  assert.equal(L.rangeText(sw, 2, 3), '26-50 ~ 51-75');
+  assert.equal(L.rangeText(sw, 2, 2), '26-50');
 });
 
 test('pickRecommendation: 오늘자만, 거절 제외, 최신 우선', () => {
@@ -51,6 +46,15 @@ test('pickRecommendation: 오늘자만, 거절 제외, 최신 우선', () => {
 test('computeRange: 현재 다음 단원부터 daily_max 만큼, 값 없으면 1', () => {
   assert.deepEqual(L.computeRange({ current_unit: 12 }), { from: 13, to: 13 });
   assert.deepEqual(L.computeRange({ current_unit: 12, daily_min: 1, daily_max: 2 }), { from: 13, to: 14 });
+});
+
+test('makeBook: 진도 막대 비율과 표기', () => {
+  const b = L.makeBook({ title: 'G', unit_label: 'Unit', total_units: 30 }, 12, 13, 14, false, '근거');
+  assert.equal(b.progressText, '12/30');
+  assert.equal(b.pct, 40);
+  assert.ok(Math.abs(b.recPct - (2 / 30) * 100) < 1e-9);
+  assert.equal(b.range, 'Unit 13–14');
+  assert.equal(b.rationale, '근거');
 });
 
 const base = () => ({
@@ -74,33 +78,67 @@ const base = () => ({
   ],
 });
 
-test('buildBoard: 오늘 슬롯만, 순서·상태, 퇴원생 제외, 요일 불일치 교재 제외', () => {
-  const b = L.buildBoard(base(), NOW, 'full');
-  assert.equal(b.dayOff, false);
-  assert.deepEqual(b.slots.map((s) => [s.label, s.state, s.students]), [
-    ['타임 1', 'past', ['김하늘']],
-    ['타임 2', 'now', ['이서준']],
+test('buildDashboard: 오늘 슬롯만, 순서, 퇴원생 제외, 요일 불일치 교재 제외, 수업 시간대', () => {
+  const m = L.buildDashboard(base(), NOW, 'full');
+  assert.equal(m.dateText, '10월 27일');
+  assert.equal(m.weekday, '화요일');
+  assert.equal(m.dayOff, false);
+  assert.deepEqual(m.hours, { start: '14:30', end: '16:30' });
+  assert.deepEqual(m.slots.map((s) => [s.label, s.start, s.end, s.students.map((x) => x.name)]), [
+    ['타임 1', '14:30', '15:30', ['김하늘']],
+    ['타임 2', '15:30', '16:30', ['이서준']],
   ]);
-  assert.equal(b.cards.length, 1); // s2 의 교재는 수요일 배정이라 화요일엔 없음
-  assert.equal(b.cards[0].range, 'Unit 13 – Unit 14');
-  assert.equal(b.cards[0].computed, false);
-  assert.equal(b.cards[0].progressText, '12 / 30');
+  const hana = m.slots[0].students[0];
+  assert.equal(hana.books.length, 1);
+  assert.equal(hana.books[0].range, 'Unit 13–14');
+  assert.equal(hana.books[0].computed, false);
+  assert.equal(m.slots[1].students[0].books.length, 0); // 이서준 교재는 수요일 배정
 });
 
-test('buildBoard: 추천 없으면 계산값 표시, 요일 미지정 교재는 포함', () => {
+test('buildDashboard: 추천 없으면 계산값, 요일 미지정 교재는 포함, 이름 가림', () => {
   const d = base();
   d.recommendations = [];
   d.progress[1].weekdays = [];
-  const b = L.buildBoard(d, NOW, 'surname');
-  assert.equal(b.cards.length, 2);
-  assert.equal(b.cards[0].computed, true);
-  assert.equal(b.cards[0].range, 'Unit 13');
-  assert.equal(b.cards[0].name, '김○○');
+  const m = L.buildDashboard(d, NOW, 'surname');
+  const b1 = m.slots[0].students[0];
+  assert.equal(b1.name, '김○○');
+  assert.equal(b1.books[0].computed, true);
+  assert.equal(b1.books[0].range, 'Unit 13');
+  assert.equal(m.slots[1].students[0].books.length, 1);
 });
 
-test('buildBoard: 수업 없는 날', () => {
+test('buildDashboard: 수업 없는 날', () => {
   const sun = new Date(2026, 9, 25, 10, 0);
-  const b = L.buildBoard(base(), sun, 'full');
-  assert.equal(b.dayOff, true);
-  assert.equal(b.cards.length, 0);
+  const m = L.buildDashboard(base(), sun, 'full');
+  assert.equal(m.dayOff, true);
+  assert.equal(m.hours, null);
+  assert.equal(m.slots.length, 0);
+});
+
+test('normalizeCustom: 기본값, 정렬 검증, 글자 크기 범위, 길이 제한, 줄바꿈 통일', () => {
+  assert.deepEqual(L.normalizeCustom(null), { text: '', align: 'left', size: 56 });
+  assert.deepEqual(L.normalizeCustom({ text: 'a\r\nb\rc', align: 'center', size: 80.4 }), { text: 'a\nb\nc', align: 'center', size: 80 });
+  assert.equal(L.normalizeCustom({ align: 'justify' }).align, 'left'); // 허용하지 않는 값은 왼쪽
+  assert.equal(L.normalizeCustom({ size: 5 }).size, L.LIMITS.sizeMin);
+  assert.equal(L.normalizeCustom({ size: 9999 }).size, L.LIMITS.sizeMax);
+  assert.equal(L.normalizeCustom({ size: 'abc' }).size, L.LIMITS.sizeDefault);
+  assert.equal(L.normalizeCustom({ text: 'x'.repeat(L.LIMITS.text + 50) }).text.length, L.LIMITS.text);
+});
+
+test('hasCustomText: 공백만 있으면 내용 없음', () => {
+  assert.equal(L.hasCustomText({ text: '  \n ' }), false);
+  assert.equal(L.hasCustomText({ text: '안내' }), true);
+  assert.equal(L.hasCustomText(null), false);
+});
+
+test('buildCustom: 날짜 머리 + 글 한 덩어리, 이름 가림은 적용하지 않는다', () => {
+  const m = L.buildCustom({ text: '오늘은 단어시험이 있습니다.\n김하늘 2번', align: 'right', size: 72 }, NOW);
+  assert.equal(m.kind, 'text');
+  assert.equal(m.dateText, '10월 27일');
+  assert.equal(m.weekday, '화요일');
+  assert.equal(m.text, '오늘은 단어시험이 있습니다.\n김하늘 2번');
+  assert.equal(m.align, 'right');
+  assert.equal(m.size, 72);
+  assert.equal(m.dayOff, false);
+  assert.deepEqual(m.slots, []);
 });
