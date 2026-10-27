@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>현황판 시안</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --board: #0f1f1b;      /* 칠판 바탕 */
+  --board-lift: #16302a; /* 칠판 한 단계 밝은 면 */
+  --chalk: #f3f0e7;      /* 흰 분필 */
+  --chalk-dim: #9db1a8;  /* 바랜 분필 */
+  --chalk-line: rgba(243, 240, 231, .16);
+  --yellow: #f5d547;     /* 지금 */
+  --sky: #7cc7e8;        /* 진도 */
+  --rose: #f08a7e;       /* 계산값·경고 */
+  --display: "Do Hyeon", "Malgun Gothic", sans-serif;
+  --text: "IBM Plex Sans KR", "Malgun Gothic", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #060d0b; color: var(--chalk); font-family: var(--text); }
+
+/* 시안 보기용 조작줄(실제 앱에는 없음) */
+.ctl { height: 46px; display: flex; gap: 8px; align-items: center; justify-content: center; padding: 0 12px; font-size: 14px; }
+.ctl button { font: inherit; padding: 6px 14px; border-radius: 6px; border: 1px solid #2c4a41; background: transparent; color: #b9cbc3; cursor: pointer; }
+.ctl button[aria-pressed="true"] { background: var(--yellow); color: #14221d; border-color: var(--yellow); font-weight: 700; }
+.ctl button:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+.frame { position: relative; height: calc(100% - 46px); overflow: hidden; }
+
+/* 1920×1080 고정 무대를 화면에 맞춰 축소 */
+.stage {
+  position: absolute; left: 50%; top: 50%; width: 1920px; height: 1080px; transform-origin: center center;
+  background:
+    radial-gradient(1200px 700px at 30% 0%, rgba(255,255,255,.05), transparent 70%),
+    var(--board);
+  padding: 44px 56px 48px; display: flex; flex-direction: column; overflow: hidden;
+}
+.stage::after { /* 아주 옅은 분필가루 질감 */
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .06; mix-blend-mode: screen;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .9 0'/></filter><rect width='300' height='300' filter='url(%23n)'/></svg>");
+}
+
+/* 머리줄 */
+.top { display: flex; justify-content: space-between; align-items: flex-end; height: 104px; flex: none; }
+.date { display: flex; align-items: baseline; gap: 22px; }
+.date .d { font: 400 80px/1 var(--display); letter-spacing: -.01em; }
+.date .w { font: 400 42px/1 var(--display); color: var(--chalk-dim); }
+.sync { font-size: 22px; color: var(--chalk-dim); display: flex; align-items: center; gap: 10px; padding-bottom: 8px; }
+.sync i { width: 10px; height: 10px; border-radius: 50%; background: #7ee0a6; }
+.sync.warn { color: var(--rose); font-weight: 600; }
+.sync.warn i { background: var(--rose); }
+
+.main { flex: 1; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns: 470px 1fr; column-gap: 56px; margin-top: 18px; }
+h2 { margin: 0 0 20px; font: 400 30px/1 var(--display); color: var(--chalk-dim); letter-spacing: .02em; }
+
+/* ───── 왼쪽: 시간 눈금자 ───── */
+.left { display: flex; flex-direction: column; min-height: 0; }
+.ruler { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: 100px 1fr; margin: 26px 0 22px; }
+.rail { position: relative; }
+.rail::before { content: ""; position: absolute; right: 18px; top: 0; bottom: 0; width: 3px; background: var(--chalk-line); border-radius: 2px; }
+.tick { position: absolute; right: 0; transform: translateY(-50%); font: 400 28px/1 var(--display); color: var(--chalk-dim); padding-right: 34px; }
+.tick::after { content: ""; position: absolute; right: 10px; top: 50%; width: 19px; height: 3px; margin-top: -1.5px; background: var(--chalk-dim); opacity: .6; }
+.slots { display: flex; flex-direction: column; min-height: 0; }
+.slot { position: relative; padding: 18px 26px 18px 28px; border-top: 1.5px solid var(--chalk-line); min-height: 0; overflow: hidden; }
+.slot:first-child { border-top-color: transparent; }
+.slot .hd { display: flex; align-items: baseline; gap: 16px; }
+.slot .lb { font: 400 36px/1 var(--display); }
+.slot .tm { font-size: 24px; color: var(--chalk-dim); }
+.slot .who { margin-top: 12px; font-size: 30px; font-weight: 500; line-height: 1.55; color: var(--chalk); }
+.slot .who span { white-space: nowrap; margin-right: .75em; display: inline-block; }
+.slot.past { opacity: .42; }
+.slot.past .lb::after { content: " ✓"; color: var(--chalk-dim); font-size: .8em; }
+.slot.now { background: linear-gradient(90deg, rgba(245,213,71,.13), rgba(245,213,71,.02)); border-top-color: transparent; }
+.slot.now::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 7px; background: var(--yellow); border-radius: 0 4px 4px 0; filter: url(#chalk); }
+.slot.now .lb { color: var(--yellow); }
+.slot.next .lb { color: var(--chalk); }
+
+/* 지금 바늘 */
+.needle { position: absolute; left: 0; right: -14px; height: 0; z-index: 1; }
+.slot > * { position: relative; z-index: 2; text-shadow: 0 0 4px var(--board), 0 0 8px var(--board), 0 0 14px var(--board); }
+.needle .clock { z-index: 3; }
+.needle .line { position: absolute; left: 70px; right: 0; top: -2.5px; height: 5px; background: var(--yellow); border-radius: 3px; filter: url(#chalk); }
+.needle .clock { position: absolute; left: 0; top: 0; transform: translateY(-50%); background: var(--yellow); color: #14221d; font: 400 34px/1 var(--display); padding: 9px 14px 8px; border-radius: 8px; letter-spacing: .01em; }
+
+/* ───── 오른쪽: 추천 진도 ───── */
+.right { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+/* 자리가 모자라면 뒤쪽 타임은 한 줄 요약으로 접는다 */
+.later-line { margin-top: 16px; opacity: 1; color: var(--chalk-dim); border-bottom: 0; border-top: 1.5px solid var(--chalk-line); padding-top: 16px; }
+.later-line b { font-size: 34px; color: var(--chalk); }
+.done-line { display: flex; align-items: baseline; gap: 18px; padding: 10px 0 14px; border-bottom: 1.5px solid var(--chalk-line); color: var(--chalk-dim); font-size: 24px; opacity: .8; }
+.done-line b { font: 400 28px/1 var(--display); color: var(--chalk-dim); }
+.group { margin-top: 20px; }
+.gh { display: flex; align-items: baseline; gap: 18px; position: relative; padding-bottom: 12px; margin-bottom: 18px; }
+.gh .t { font: 400 44px/1 var(--display); }
+.gh .r { font-size: 26px; color: var(--chalk-dim); }
+.gh .c { margin-left: auto; font-size: 24px; color: var(--chalk-dim); }
+.gh::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 4px; border-radius: 2px; background: var(--chalk-line); }
+.group.focus .gh .t { color: var(--yellow); }
+.group.focus .gh::after { background: var(--yellow); filter: url(#chalk); height: 5px; }
+.group.later { --s: .86; opacity: .85; }
+.group.later .gh .t { font-size: 36px; }
+
+.students { display: grid; grid-template-columns: 1fr 1fr; column-gap: 44px; row-gap: calc(22px * var(--s, 1)); align-items: start; }
+.stu { display: grid; grid-template-columns: calc(116px * var(--s, 1)) 1fr; column-gap: 8px; }
+.stu .nm { font: 400 calc(38px * var(--s, 1))/calc(44px * var(--s, 1)) var(--display); }
+.bk { display: grid; grid-template-columns: 1fr 60px 50px 160px; align-items: center; column-gap: 10px; min-height: calc(44px * var(--s, 1)); }
+.bk .tt { font-size: calc(21px * var(--s, 1)); color: var(--chalk-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar { position: relative; height: 10px; border-radius: 5px; background: rgba(243,240,231,.14); overflow: hidden; }
+.bar i { position: absolute; top: 0; bottom: 0; }
+.bar .cur { left: 0; background: var(--sky); border-radius: 5px 0 0 5px; }
+.bar .rec { background: var(--yellow); }
+.bk .fr { font-size: calc(18px * var(--s, 1)); color: var(--chalk-dim); text-align: right; font-variant-numeric: tabular-nums; }
+.bk .rg { font: 700 calc(28px * var(--s, 1))/1.1 var(--text); letter-spacing: -.01em; white-space: nowrap; }
+/* 추천이 없어 계산한 값: 분홍색 점선 밑줄 */
+.bk.calc .rg, .calcdemo { color: var(--rose); text-decoration: underline dotted 2.5px; text-underline-offset: 7px; }
+.legend { margin-top: auto; padding-top: 10px; display: flex; gap: 26px; font-size: 18px; color: var(--chalk-dim); }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend i { width: 26px; height: 9px; border-radius: 5px; display: inline-block; }
+
+/* 전체 안내 */
+.msg { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; flex-direction: column; text-align: center; gap: 22px; }
+.msg .big { font: 400 120px/1.1 var(--display); }
+.msg .sm { font-size: 34px; color: var(--chalk-dim); }
+.stage.dayoff .main, .stage.dayoff .legend { visibility: hidden; }
+.stage.dayoff .msg { display: flex; }
+.stage.dayoff .top { position: relative; z-index: 2; }
+.after { margin: auto 0; text-align: center; font: 400 64px/1.3 var(--display); color: var(--chalk-dim); }
+.after small { display: block; font: 400 28px/1.4 var(--text); margin-top: 16px; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="chalk" x="-5%" y="-30%" width="110%" height="160%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="4" result="n"/>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="3.4"/>
+  </filter>
+</svg>
+
+<div class="ctl" role="group" aria-label="시안 상태 바꾸기">
+  <button data-mode="at" data-t="14:10" aria-pressed="false">수업 전 14:10</button>
+  <button data-mode="at" data-t="15:45" aria-pressed="true">수업 중 15:45</button>
+  <button data-mode="at" data-t="16:40" aria-pressed="false">마지막 타임 16:40</button>
+  <button data-mode="at" data-t="17:45" aria-pressed="false">수업 끝 17:45</button>
+  <button data-mode="offline" aria-pressed="false">연결 끊김</button>
+  <button data-mode="dayoff" aria-pressed="false">수업 없는 날</button>
+</div>
+<div class="frame"><div class="stage" id="stage"></div></div>
+
+<script>
+// 시안용 가짜 데이터. 실제 학생 정보가 아니다.
+const SLOTS = [
+  { label: '타임 1', start: '14:30', end: '15:30', ids: ['a1','a2','a3','a4','a5'] },
+  { label: '타임 2', start: '15:30', end: '16:30', ids: ['b1','b2','b3','b4','b5','b6'] },
+  { label: '타임 3', start: '16:30', end: '17:30', ids: ['c1','c2'] },
+];
+// [교재, 전체, 현재, 추천 끝, 추천 표기, 계산값?]
+const S = {
+  a1: ['김도윤', [['Grammar Inside 2',30,21,22,'Unit 22'], ['Reading Explorer 1',20,9,10,'Chapter 10'], ['Word Master 2',40,17,19,'Day 18–19']]],
+  a2: ['이서아', [['Phonics Fun 3',24,13,14,'Unit 14'], ['Sight Words',12,6,7,'151–175']]],
+  a3: ['박지호', [['Grammar Inside 2',30,8,9,'Unit 9',1], ['Reading Explorer 1',20,5,6,'Chapter 6']]],
+  a4: ['최하린', [['Grammar Inside 3',30,2,4,'Unit 3–4'], ['Writing Steps',16,4,5,'Lesson 5'], ['Word Master 2',40,28,30,'Day 29–30']]],
+  a5: ['정시우', [['Phonics Fun 3',24,19,20,'Unit 20'], ['Reading Explorer 2',20,1,2,'Chapter 2']]],
+  b1: ['한예은', [['Grammar Inside 2',30,12,14,'Unit 13–14'], ['Reading Explorer 1',20,7,8,'Chapter 8'], ['Sight Words',12,5,6,'126–150']]],
+  b2: ['오준서', [['Grammar Inside 2',30,18,20,'Unit 19–20'], ['Word Master 2',40,22,25,'Day 23–25',1]]],
+  b3: ['윤채원', [['Phonics Fun 3',24,9,10,'Unit 10'], ['Reading Explorer 1',20,3,4,'Chapter 4'], ['Writing Steps',16,6,7,'Lesson 7',1]]],
+  b4: ['서민재', [['Grammar Inside 2',30,25,27,'Unit 26–27'], ['Word Master 2',40,31,34,'Day 32–34']]],
+  b5: ['문유나', [['Phonics Fun 3',24,15,16,'Unit 16'], ['Sight Words',12,8,9,'201–225']]],
+  b6: ['임하준', [['Grammar Inside 2',30,4,5,'Unit 5',1], ['Reading Explorer 1',20,2,3,'Chapter 3'], ['Word Master 2',40,10,12,'Day 11–12']]],
+  c1: ['강소율', [['Grammar Inside 3',30,6,8,'Unit 7–8'], ['Reading Explorer 2',20,4,5,'Chapter 5']]],
+  c2: ['조은우', [['Phonics Fun 2',24,11,12,'Unit 12'], ['Word Master 1',40,14,16,'Day 15–16',1]]],
+};
+const m = (hhmm) => { const [h, mi] = hhmm.split(':').map(Number); return h * 60 + mi; };
+const hm = (x) => `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`;
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+const stage = document.getElementById('stage');
+let mode = 'at', clock = '15:45';
+
+function bookLine([title, total, cur, to, label, calc]) {
+  const pc = (cur / total) * 100, pr = Math.max(((to - cur) / total) * 100, 2.5);
+  return `<div class="bk${calc ? ' calc' : ''}">
+    <span class="tt" title="${esc(title)}">${esc(title)}</span>
+    <div class="bar" role="img" aria-label="${cur}/${total}"><i class="cur" style="width:${pc}%"></i><i class="rec" style="left:${pc}%;width:${pr}%"></i></div>
+    <span class="fr">${cur}/${total}</span>
+    <span class="rg">${esc(label)}</span>
+  </div>`;
+}
+function stuBlock(id) {
+  const [name, books] = S[id];
+  return `<div class="stu"><div class="nm">${esc(name)}</div><div>${books.map(bookLine).join('')}</div></div>`;
+}
+
+function render() {
+  const t = m(clock);
+  const t0 = m(SLOTS[0].start), t1 = m(SLOTS[SLOTS.length - 1].end);
+  const state = (s) => (t >= m(s.end) ? 'past' : t >= m(s.start) ? 'now' : 'upcoming');
+  const sts = SLOTS.map(state);
+  const nowIdx = sts.indexOf('now');
+  const focusIdx = nowIdx >= 0 ? nowIdx : sts.indexOf('upcoming'); // 수업 중이 아니면 다음 타임을 크게
+  const allDone = focusIdx < 0;
+  const pct = (x) => ((x - t0) / (t1 - t0)) * 100;
+
+  const ticks = [t0, ...SLOTS.map((s) => m(s.end))].map((x) => `<div class="tick" style="top:${pct(x)}%">${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}</div>`).join('');
+  const slotsHtml = SLOTS.map((s, i) => {
+    const cls = sts[i] === 'past' ? 'past' : sts[i] === 'now' ? 'now' : (i === focusIdx ? 'next' : '');
+    return `<div class="slot ${cls}" style="flex:${m(s.end) - m(s.start)}"><div class="hd"><span class="lb">${s.label}</span><span class="tm">${s.start}–${s.end}</span></div>
+      <div class="who">${s.ids.map((id) => `<span>${esc(S[id][0])}</span>`).join('')}</div></div>`;
+  }).join('');
+  const needle = t >= t0 && t <= t1 ? `<div class="needle" style="top:${pct(t)}%"><div class="line"></div><div class="clock">${clock}</div></div>` : '';
+
+  let right = '';
+  if (allDone) {
+    right = `<div class="after">오늘 수업이 모두 끝났습니다<small>수고하셨습니다.</small></div>`;
+  } else {
+    SLOTS.forEach((s, i) => {
+      if (sts[i] === 'past') {
+        right += `<div class="done-line"><b>${s.label}</b>${s.start}–${s.end}<span>${s.ids.length}명 수업 끝</span></div>`;
+      } else {
+        const focus = i === focusIdx;
+        right += `<section class="group ${focus ? 'focus' : 'later'}"><div class="gh"><span class="t">${focus ? (sts[i] === 'now' ? '지금' : '다음') : '이어서'} ${s.label}</span><span class="r">${s.start}–${s.end}</span><span class="c">${s.ids.length}명</span></div>
+          <div class="students">${s.ids.map(stuBlock).join('')}</div></section>`;
+      }
+    });
+    right += `<div class="legend"><span><i style="background:var(--sky)"></i>지금까지 한 진도</span><span><i style="background:var(--yellow)"></i>오늘 나갈 범위</span><span><b class="calcdemo" style="font-weight:600">Unit 5</b>추천이 없어 계산한 값</span></div>`;
+  }
+
+  const offline = mode === 'offline';
+  stage.className = 'stage' + (mode === 'dayoff' ? ' dayoff' : '');
+  stage.innerHTML = `
+    <header class="top">
+      <div class="date"><span class="d">10월 27일</span><span class="w">화요일</span></div>
+      <div class="sync${offline ? ' warn' : ''}"><i></i>${offline ? '갱신 실패, 마지막 성공 15:21' : hm(t - 1) + ' 갱신'}</div>
+    </header>
+    <div class="main">
+      <section class="left" aria-label="오늘 시간표"><h2>오늘 시간표</h2>
+        <div class="ruler"><div class="rail">${ticks}</div><div class="slots">${slotsHtml}</div>${needle}</div>
+      </section>
+      <section class="right" aria-label="오늘의 추천 진도"><h2>오늘의 추천 진도</h2>${right}</section>
+    </div>
+    <div class="msg"><div class="big">오늘은 수업이 없습니다</div></div>`;
+  fitRight();
+}
+
+// 오른쪽 목록이 넘치면 뒤쪽 타임부터 한 줄 요약으로 바꾼다(스크롤·순환 없음)
+function fitRight() {
+  const right = stage.querySelector('.right');
+  if (!right) return;
+  const groups = [...right.querySelectorAll('.group.later')];
+  while (right.scrollHeight > right.clientHeight + 1 && groups.length) {
+    const g = groups.pop();
+    const line = document.createElement('div');
+    line.className = 'done-line later-line';
+    line.innerHTML = `<b>${g.querySelector('.t').innerHTML}</b>${g.querySelector('.r').innerHTML}<span>${g.querySelector('.c').innerHTML} 대기</span>`;
+    g.replaceWith(line);
+  }
+}
+
+function fit() {
+  const f = document.querySelector('.frame');
+  const k = Math.min(f.clientWidth / 1920, f.clientHeight / 1080);
+  stage.style.transform = `translate(-50%, -50%) scale(${k})`;
+}
+document.querySelectorAll('.ctl button').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('.ctl button').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  mode = b.dataset.mode; if (b.dataset.t) clock = b.dataset.t;
+  if (mode === 'offline') clock = '15:45';
+  render(); fit();
+}));
+addEventListener('resize', fit);
+if (window.ResizeObserver) new ResizeObserver(fit).observe(document.querySelector('.frame'));
+(document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve()).then(() => { render(); fit(); });
+render(); fit();
+</script>
+</body>
+</html>
