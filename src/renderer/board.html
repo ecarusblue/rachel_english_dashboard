@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:">
+  <title>공부방 진도 현황판</title>
+  <link rel="stylesheet" href="board.css">
+</head>
+<body>
+  <header class="top">
+    <div id="date" class="date">오늘</div>
+    <div id="sync" class="sync"></div>
+  </header>
+
+  <main id="main" class="grid">
+    <section class="panel schedule" aria-label="오늘 시간표">
+      <h2>오늘 시간표</h2>
+      <ol id="slots" class="slots"></ol>
+    </section>
+    <section class="panel recs" aria-label="오늘의 추천 진도">
+      <h2>오늘의 추천 진도</h2>
+      <div id="cards" class="cards"></div>
+    </section>
+  </main>
+
+  <div id="notice" class="notice" hidden></div>
+  <script src="board.js"></script>
+</body>
+</html>
