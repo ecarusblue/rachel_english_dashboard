@@ -240,8 +240,37 @@ function buildCustom(custom, now) {
   };
 }
 
+// ---- 디스플레이 ----
+// displays: [{ id, label, size:{width,height} }] (Electron screen.getAllDisplays() 모양)
+
+// 현황판을 띄울 화면을 고른다.
+// - 화면이 하나뿐이면(복제 모드 포함) 저장된 선택과 상관없이 그 화면
+// - 둘 이상이면 저장된 화면. 그 화면이 지금 없으면 null(기본 화면에 띄우지 않고 기다린다)
+// - 저장된 선택이 없으면 보조 화면, 없으면 주 화면
+function chooseDisplay(displays, primaryId, savedId) {
+  if (!displays.length) return null;
+  if (displays.length === 1) return displays[0];
+  if (savedId != null) return displays.find((d) => d.id === savedId) || null;
+  return displays.find((d) => d.id !== primaryId) || displays.find((d) => d.id === primaryId) || displays[0];
+}
+
+// 목록에 보여줄 이름. 번호는 이 앱이 정한 것이다(Windows 설정의 번호는 프로그램에서 알 수 없다).
+function describeDisplays(displays, primaryId) {
+  return displays.map((d, i) => ({
+    id: d.id,
+    number: i + 1,
+    label: [
+      `${i + 1}번`,
+      d.label ? String(d.label) : null,
+      `${d.size.width}×${d.size.height}`,
+      d.id === primaryId ? '주 화면' : '보조 화면',
+    ].filter(Boolean).join(' · '),
+  }));
+}
+
 module.exports = {
   dateKey, dateText, weekdayText, maskName, unitText, rangeText,
   pickRecommendation, computeRange, makeBook,
   buildDashboard, buildCustom, normalizeCustom, hasCustomText, WEEKDAY_KO, LIMITS, ALIGNS,
+  chooseDisplay, describeDisplays,
 };

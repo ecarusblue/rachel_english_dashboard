@@ -75,14 +75,20 @@ function validate(s) {
 function loadSettings() {
   const saved = readJson('settings.json', {});
   const s = sanitize(saved);
-  // 개발 편의: 설정이 비어 있으면 프로젝트 루트의 config.local.json(.gitignore 대상)으로 채운다.
+  // 설정이 비어 있으면 config.local.json(.gitignore 대상)으로 채운다.
+  // 개발 실행은 프로젝트 루트, 설치본은 빌드 때 resources 폴더에 넣어 둔 파일을 본다.
   if (!s.supabaseUrl || !s.supabaseKey) {
-    try {
-      const local = JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'config.local.json'), 'utf8'));
-      if (!s.supabaseUrl) s.supabaseUrl = String(local.supabaseUrl || '').trim().replace(/\/+$/, '');
-      if (!s.supabaseKey) s.supabaseKey = String(local.supabaseKey || '').trim();
-    } catch {
-      /* 없으면 무시 */
+    const places = [path.join(app.getAppPath(), 'config.local.json')];
+    if (process.resourcesPath) places.push(path.join(process.resourcesPath, 'config.local.json'));
+    for (const file of places) {
+      try {
+        const local = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (!s.supabaseUrl) s.supabaseUrl = String(local.supabaseUrl || '').trim().replace(/\/+$/, '');
+        if (!s.supabaseKey) s.supabaseKey = String(local.supabaseKey || '').trim();
+        break;
+      } catch {
+        /* 없으면 다음 위치 */
+      }
     }
   }
   if (isSecretKey(s.supabaseKey)) s.supabaseKey = '';

@@ -224,8 +224,43 @@ async function enterSettings() {
   await loadSettingsForm();
 }
 
+// 디스플레이 목록: 앱이 보내 주는 값으로 그린다. 모니터를 꽂거나 빼면 바로 갱신하되,
+// 지금 고르고 있는 값(아직 저장 전)은 그대로 둔다.
+let displaySig = '';
+function syncDisplays(initial) {
+  const list = ctl.displays || [];
+  const sel = $('s-display');
+  const sig = JSON.stringify(list);
+  const savedId = ctl.settings.displayId == null ? '' : String(ctl.settings.displayId);
+  if (initial || sig !== displaySig) {
+    const keep = initial ? savedId : sel.value;
+    displaySig = sig;
+    sel.replaceChildren();
+    const auto = document.createElement('option');
+    auto.value = '';
+    auto.textContent = '자동 (보조 화면이 있으면 보조 화면)';
+    sel.append(auto);
+    list.forEach((d) => {
+      const o = document.createElement('option');
+      o.value = String(d.id);
+      o.textContent = d.label;
+      sel.append(o);
+    });
+    sel.value = [...sel.options].some((o) => o.value === keep) ? keep : '';
+  }
+  const note = $('s-display-note');
+  if (list.length === 1) {
+    note.textContent = '연결된 화면이 하나라서 현황판은 이 화면에 나옵니다. (복제 모드도 같습니다)';
+  } else if (savedId && !list.some((d) => String(d.id) === savedId)) {
+    note.textContent = '저장해 둔 화면이 지금 연결돼 있지 않습니다. 연결되면 그 화면에 나옵니다.';
+  } else {
+    note.textContent = '';
+  }
+}
+
+$('s-identify').addEventListener('click', () => window.api.identifyDisplays());
+
 async function loadSettingsForm() {
-  const displays = await window.api.listDisplays();
   const s = ctl.settings;
   $('s-url').value = s.supabaseUrl || '';
   $('s-key').value = '';
@@ -234,19 +269,7 @@ async function loadSettingsForm() {
   $('s-name').value = s.nameMode;
   $('s-theme').value = s.theme;
   $('s-auto').checked = !!s.autoLaunch;
-  const sel = $('s-display');
-  sel.replaceChildren();
-  const auto = document.createElement('option');
-  auto.value = '';
-  auto.textContent = '자동 (보조 화면이 있으면 보조 화면)';
-  sel.append(auto);
-  displays.forEach((d) => {
-    const o = document.createElement('option');
-    o.value = String(d.id);
-    o.textContent = d.label;
-    sel.append(o);
-  });
-  sel.value = s.displayId == null ? '' : String(s.displayId);
+  syncDisplays(true);
   settingsLoaded = true;
 }
 
@@ -277,6 +300,7 @@ function renderCtl(s) {
     if (!settingsLoaded) loadSettingsForm();
   }
   updateSide();
+  if (settingsLoaded) syncDisplays(false); // 모니터를 꽂거나 뺐을 때 목록 갱신
   if (view === 'home') updateHome();
 }
 

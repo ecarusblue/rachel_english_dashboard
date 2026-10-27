@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('api', {
   logout: () => ipcRenderer.invoke('auth:logout'),
   saveSettings: (s) => ipcRenderer.invoke('settings:save', s),
   listDisplays: () => ipcRenderer.invoke('displays:list'),
+  identifyDisplays: () => ipcRenderer.invoke('displays:identify'),
   openBoard: (source) => ipcRenderer.invoke('board:open', source),
   closeBoard: () => ipcRenderer.invoke('board:close'),
   getCustom: () => ipcRenderer.invoke('custom:get'),

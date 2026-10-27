@@ -63,8 +63,9 @@ function boardSnapshot() {
 }
 
 function displayLabel() {
-  const d = screen.getAllDisplays().find((x) => x.id === settings.displayId);
-  return d ? `${d.size.width}×${d.size.height}` : null;
+  const t = pickDisplay();
+  const d = t && displayList().find((x) => x.id === t.id);
+  return d ? `${d.number}번 화면` : null;
 }
 
 function controlSnapshot() {
@@ -76,6 +77,7 @@ function controlSnapshot() {
     boardSource,
     boardOpen: !!board,
     displayLabel: displayLabel(),
+    displays: displayList(),
     live: live
       ? {
           dayOff: live.dayOff,
@@ -164,13 +166,49 @@ async function initClient() {
 }
 
 // ---------- 디스플레이·창 ----------
+// 화면이 하나뿐이면(복제 모드 포함) 그 화면, 둘 이상이면 저장된 화면. 없으면 기다린다(D-3).
 function pickDisplay() {
-  const all = screen.getAllDisplays();
-  if (settings.displayId != null) {
-    // 지정한 화면이 없으면 기본 화면에 띄우지 않고 대기(D-3)
-    return all.find((d) => d.id === settings.displayId) || null;
-  }
-  return all.find((d) => d.id !== screen.getPrimaryDisplay().id) || screen.getPrimaryDisplay();
+  return L.chooseDisplay(screen.getAllDisplays(), screen.getPrimaryDisplay().id, settings.displayId);
+}
+
+function displayList() {
+  return L.describeDisplays(screen.getAllDisplays(), screen.getPrimaryDisplay().id);
+}
+
+// 모니터를 꽂거나 뺐을 때: 현황판을 다시 배치하고 홈 창의 목록도 바로 갱신한다
+function onDisplaysChanged() {
+  placeBoard();
+  pushState();
+}
+
+// 연결된 모니터마다 이 앱이 정한 번호를 3초 동안 크게 띄운다(목록의 1번/2번과 같은 번호)
+function identifyDisplays() {
+  const html = (n) =>
+    `<!doctype html><meta charset="utf-8"><body style="margin:0;height:100vh;display:grid;place-items:center;background:#0f3d44;color:#fff;font-family:'Segoe UI','Malgun Gothic',sans-serif;text-align:center">` +
+    `<div><div style="font-size:150px;font-weight:800;line-height:1">${n}</div><div style="font-size:30px;margin-top:8px;color:#a8c8ca">번 화면</div></div></body>`;
+  screen.getAllDisplays().forEach((d, i) => {
+    const w = 300;
+    const win = new BrowserWindow({
+      x: d.bounds.x + Math.round((d.bounds.width - w) / 2),
+      y: d.bounds.y + Math.round((d.bounds.height - w) / 2),
+      width: w,
+      height: w,
+      frame: false,
+      resizable: false,
+      focusable: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      show: false,
+      backgroundColor: '#0f3d44',
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+    });
+    win.setIgnoreMouseEvents(true);
+    win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html(i + 1))}`);
+    win.once('ready-to-show', () => win.showInactive());
+    setTimeout(() => {
+      if (!win.isDestroyed()) win.destroy();
+    }, 3000);
+  });
 }
 
 function lockDown(win) {
@@ -312,17 +350,18 @@ function trayIcon() {
   return nativeImage.createFromBuffer(Buffer.from(require('./assets/tray-icon'), 'base64'));
 }
 
+let trayMenu = null;
+
 function createTray() {
   tray = new Tray(trayIcon());
   tray.setToolTip('공부방 현황판');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: '홈 열기', click: () => openControl() },
-      { label: '현황판 닫기', click: () => closeBoard() },
-      { type: 'separator' },
-      { label: '종료', click: () => app.quit() },
-    ])
-  );
+  trayMenu = Menu.buildFromTemplate([
+    { label: '홈 열기', click: () => openControl() },
+    { label: '현황판 닫기', click: () => closeBoard() },
+    { type: 'separator' },
+    { label: '종료', click: () => app.quit() },
+  ]);
+  tray.setContextMenu(trayMenu);
   tray.on('double-click', () => openControl());
 }
 
@@ -357,12 +396,10 @@ function registerIpc() {
     return { ok: true };
   });
 
-  ipcMain.handle('displays:list', () => {
-    const primaryId = screen.getPrimaryDisplay().id;
-    return screen.getAllDisplays().map((d, i) => ({
-      id: d.id,
-      label: `${d.label || `디스플레이 ${i + 1}`} · ${d.size.width}×${d.size.height}${d.id === primaryId ? ' · 주 화면' : ' · 보조 화면'}`,
-    }));
+  ipcMain.handle('displays:list', () => displayList());
+  ipcMain.handle('displays:identify', () => {
+    identifyDisplays();
+    return { ok: true };
   });
 
   ipcMain.handle('auth:login', async (_e, { email, password }) => {
@@ -454,6 +491,25 @@ async function devShots() {
       nativeTheme.themeSource = 'light';
       await wait(1200);
       await cap(control, '9-home-light-open');
+      await click(control, '[data-nav="settings"]');
+      await wait(900);
+      await cap(control, '10-settings');
+      // "화면 번호 보기": 실제 IPC 경로로 눌러 보고, 각 모니터에 뜬 번호 창을 캡처한다
+      await click(control, '#s-identify');
+      await wait(1200);
+      const marks = BrowserWindow.getAllWindows().filter((w) => w.webContents.getURL().startsWith('data:'));
+      for (let i = 0; i < marks.length; i += 1) await cap(marks[i], `11-identify-${i + 1}`);
+      await wait(2500);
+      // 모니터 변화 흉내: 목록이 바뀌면 화면이 갱신되는지(실제 하드웨어를 꽂고 뽑을 수는 없다)
+      const real = controlSnapshot();
+      const send = (snap) => control.webContents.send('control:update', snap);
+      send({ ...real, displays: real.displays.slice(0, 1) });
+      await wait(700);
+      await cap(control, '12-one-display');
+      send({ ...real, settings: { ...real.settings, displayId: 999 } });
+      await wait(700);
+      await cap(control, '13-saved-missing');
+      pushState();
     }
   } catch (e) {
     fs.appendFileSync(path.join(SHOT_DIR, 'error.log'), `${e && e.stack}\n`);
@@ -477,9 +533,9 @@ if (!app.requestSingleInstanceLock()) {
     createTray();
     applyAutoLaunch();
 
-    screen.on('display-added', placeBoard);
-    screen.on('display-removed', placeBoard);
-    screen.on('display-metrics-changed', placeBoard);
+    screen.on('display-added', onDisplaysChanged);
+    screen.on('display-removed', onDisplaysChanged);
+    screen.on('display-metrics-changed', onDisplaysChanged);
 
     openControl();
     if (DEMO) {
@@ -494,6 +550,10 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     if (SHOT_DIR) devShots();
+    // 개발용: 트레이 메뉴의 "종료" 항목을 실제로 눌러 앱이 끝나는지 확인한다
+    if (process.env.DASHBOARD_TEST_TRAY_QUIT) {
+      setTimeout(() => trayMenu.items.find((i) => i.label === '종료').click(), 4000);
+    }
 
     setInterval(() => {
       // 날짜가 바뀌면 오늘 기준으로 다시 읽고, 아니면 화면만 다시 계산한다(N-3)
@@ -509,5 +569,8 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', () => {
     quitting = true;
     if (blockerId != null && powerSaveBlocker.isStarted(blockerId)) powerSaveBlocker.stop(blockerId);
+    if (tray && !tray.isDestroyed()) tray.destroy(); // 종료 뒤 트레이에 빈 아이콘이 남지 않게
+    // 종료가 어떤 이유로 지연되더라도 프로세스가 백그라운드에 남지 않게 한다
+    setTimeout(() => app.exit(0), 4000);
   });
 }
