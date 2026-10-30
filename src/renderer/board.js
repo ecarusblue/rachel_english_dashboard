@@ -69,23 +69,13 @@ function renderTop() {
   const sts = slotStates(dashboard.slots, min);
   const strip = $('strip');
   strip.replaceChildren();
+  // 글자만: 타임 이름과 시간. 지금 타임은 주황 알약, 끝난 타임은 옅게(스타일은 board.css)
   dashboard.slots.forEach((s, i) => {
-    const a = toMin(s.start);
-    const b = toMin(s.end);
-    const dur = a != null && b != null && b > a ? b - a : 60;
     const seg = el('div', `seg ${sts[i]}`);
-    seg.style.flex = `${dur} 1 0`;
-    const bar = el('div', 'bar');
-    const fill = el('div', 'fill');
-    bar.append(fill);
-    if (sts[i] === 'now') {
-      const frac = Math.min(Math.max((min - a) / dur, 0), 1);
-      fill.style.width = `${frac * 100}%`;
-      const needle = el('div', 'needle');
-      needle.style.left = `${frac * 100}%`;
-      bar.append(needle);
-    }
-    seg.append(el('div', 'lb', s.label), el('div', 'tm', s.start && s.end ? `${s.start}–${s.end}` : ''), bar);
+    seg.append(
+      el('div', 'lb', s.label),
+      el('div', 'tm', s.start && s.end ? `${s.start}–${s.end}` : '')
+    );
     strip.append(seg);
   });
 
@@ -111,20 +101,10 @@ function hhmmLocal(iso) {
 // ---------- 중앙 ----------
 function bookCell(b) {
   const cell = el('div', `bk${b.computed ? ' calc' : ''}`);
-  const l1 = el('div', 'l1');
-  const tt = el('span', 'tt', b.title);
+  // 글자만: 교재명(작게) 위에 오늘 범위(크게). 막대와 분수는 없다.
+  const tt = el('div', 'tt', b.title);
   tt.title = b.title;
-  l1.append(tt, el('span', 'fr', b.progressText));
-  const l2 = el('div', 'l2');
-  const bar = el('div', 'bar2');
-  const cur = el('i', 'cur');
-  cur.style.width = `${b.pct}%`;
-  const rec = el('i', 'rec');
-  rec.style.left = `${b.pct}%`;
-  rec.style.width = `${Math.max(b.recPct, 3)}%`;
-  bar.append(cur, rec);
-  l2.append(el('span', 'rg', b.range), bar);
-  cell.append(l1, l2);
+  cell.append(tt, el('div', 'rg', b.range));
   return cell;
 }
 
@@ -138,13 +118,54 @@ function studentRow(st) {
   return row;
 }
 
-// 학생 줄이 넘치면 글자를 줄여 한 화면에 맞춘다(스크롤·순환 없음)
+// 한 화면에 맞추는 단계(스크롤·순환 없음). 이름과 오늘 범위는 읽을 수 있는 크기 아래로 줄이지 않는다.
+//  0) 줄이 적으면 오히려 키워서 빈 공간을 채운다(최대 1.25배)
+//  1) 교재를 한 줄에 4칸으로
+//  1-2) 학생이 4명 이상이면 학생을 2열로
+//  2) 교재명을 작게(최소 22px)
+//  3) 이름·범위를 최소 72%까지(이름 46px, 범위 36px 이상)
+//  4) 그래도 넘치면 뒤쪽 학생을 "외 N명"으로
 function fitMain() {
-  let s = 1;
-  mainEl.style.setProperty('--s', s);
-  while (mainEl.scrollHeight > mainEl.clientHeight + 1 && s > 0.55) {
-    s = Math.round((s - 0.04) * 100) / 100;
-    mainEl.style.setProperty('--s', s);
+  const rows = mainEl.querySelector('.rows');
+  const set = (o) => Object.entries(o).forEach(([k, v]) => mainEl.style.setProperty(k, String(v)));
+  const over = () => mainEl.scrollHeight > mainEl.clientHeight + 1;
+  rows.classList.remove('twocol');
+  mainEl.querySelectorAll('.more').forEach((n) => n.remove());
+  set({ '--s': 1, '--g': 1, '--sec': 1, '--cols': 3 });
+
+  if (!over()) {
+    let g = 1;
+    for (let t = 1.05; t <= 1.251; t += 0.05) {
+      set({ '--g': t });
+      if (over()) break;
+      g = t;
+    }
+    set({ '--g': g });
+    return;
+  }
+  set({ '--cols': 4 });
+  if (!over()) return;
+  // 학생이 4명 이상이면 학생을 2열로 나란히(모두 읽을 수 있는 크기로 보이게)
+  if (rows.children.length >= 4) {
+    rows.classList.add('twocol');
+    if (!over()) return;
+  }
+  set({ '--sec': 0.85 });
+  if (!over()) return;
+  for (let s = 0.95; s >= 0.719; s -= 0.04) {
+    set({ '--s': Math.round(s * 100) / 100 });
+    if (!over()) return;
+  }
+  // 4단계: 최소 크기에서도 넘치면 뒤쪽 학생을 접는다
+  const stus = [...rows.children];
+  const more = el('div', 'more');
+  rows.append(more);
+  const hidden = [];
+  while (over() && stus.length - hidden.length > 1) {
+    const last = stus[stus.length - 1 - hidden.length];
+    hidden.unshift(last.querySelector('.nm').textContent);
+    last.remove();
+    more.textContent = `외 ${hidden.length}명  ${hidden.join('  ')}`;
   }
 }
 
@@ -199,7 +220,6 @@ function renderMain() {
   if (slot.students.length) slot.students.forEach((st) => rows.append(studentRow(st)));
   else rows.append(el('div', 'empty', '이 타임에 배정된 학생이 없습니다'));
   mainEl.append(gh, rows);
-  fitMain();
 
   // 하단: 이어지는 타임(이름만) + 범례
   const later = dashboard.slots.map((s, i) => ({ s, i })).filter(({ i }) => i > focus);
@@ -219,12 +239,6 @@ function renderMain() {
     sp.append(swatch, document.createTextNode(text));
     return sp;
   };
-  const dot = (color) => {
-    const i = el('i');
-    i.style.background = color;
-    return i;
-  };
-  legend.append(item(dot('var(--progress)'), '지금까지 한 진도'), item(dot('var(--accent)'), '오늘 나갈 범위'));
   if (slot.students.some((st) => st.books.some((b) => b.computed))) {
     const demo = el('b', 'calcdemo', 'Unit 5');
     demo.style.fontWeight = '700';
@@ -232,6 +246,7 @@ function renderMain() {
   }
   footEl.append(next, legend);
   footEl.hidden = false;
+  fitMain(); // 하단 영역이 자리를 잡은 뒤에 맞춘다(전에는 하단이 비어 있을 때 맞춰서 아래가 잘릴 수 있었다)
 }
 
 // ---------- 전체 ----------

@@ -18,18 +18,16 @@ body.idle, body.idle * { cursor: none !important; } /* 3초간 입력이 없으�
 .date .hours { margin-top: 1.5rem; font-size: 3rem; font-weight: 600; min-height: 3.6rem; }
 .date .hours span { color: var(--side-muted); font-weight: 500; margin-right: 1.2rem; }
 
-.strip { display: flex; gap: 1.2rem; align-items: stretch; }
-.seg { position: relative; min-width: 0; }
-.seg .lb { font-size: 3rem; font-weight: 700; line-height: 1.1; white-space: nowrap; }
-.seg .tm { margin-top: .5rem; font-size: 2.2rem; color: var(--side-muted); white-space: nowrap; min-height: 2.6rem; font-variant-numeric: tabular-nums; }
-.seg .bar { position: relative; margin-top: 1.4rem; height: 1.6rem; border-radius: .8rem; background: var(--side-line); }
-.seg .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: .8rem; }
-.seg.past { opacity: .55; }
+/* 상단 띠의 타임 목록: 글자만. 지금 타임은 주황 알약, 끝난 타임은 옅게 */
+.strip { display: flex; gap: 1.6rem; align-items: center; }
+.seg { min-width: 0; padding: 1.1rem 2rem 1.3rem; border-radius: 1.6rem; }
+.seg .lb { font-size: 3.2rem; font-weight: 700; line-height: 1.1; white-space: nowrap; }
+.seg .tm { margin-top: .3rem; font-size: 2.4rem; color: var(--side-muted); white-space: nowrap; min-height: 2.6rem; font-variant-numeric: tabular-nums; }
+.seg.past { opacity: .5; }
 .seg.past .lb::after { content: " ✓"; font-size: .8em; color: var(--side-muted); }
-.seg.past .fill { width: 100%; background: var(--side-muted); }
-.seg.now .lb { color: var(--orange); }
-.seg.now .fill { background: var(--side-active); box-shadow: inset 0 0 0 .15rem rgba(244, 162, 122, .45); }
-.needle { position: absolute; top: -.9rem; bottom: -.9rem; width: .6rem; margin-left: -.3rem; background: var(--orange); border-radius: .3rem; z-index: 2; }
+.seg.now { background: var(--orange); color: #0b3238; }
+.seg.now .lb { color: #0b3238; }
+.seg.now .tm { color: rgba(11, 50, 56, .82); font-weight: 600; }
 
 .clockbox { text-align: right; }
 .clock { font-size: 13rem; font-weight: 800; line-height: .9; letter-spacing: -.04em; font-variant-numeric: tabular-nums; color: #fff; }
@@ -48,20 +46,22 @@ body.idle, body.idle * { cursor: none !important; } /* 3초간 입력이 없으�
 .gh .c { margin-left: auto; font-size: 3rem; font-weight: 600; color: var(--muted); }
 
 .rows { display: flex; flex-direction: column; background: var(--surface); border: .1rem solid var(--border); border-radius: 1.4rem; padding: 0 3rem; }
-.stu { display: grid; grid-template-columns: calc(24rem * var(--s)) 1fr; align-items: center; padding: calc(1rem * var(--s)) 0; border-bottom: .1rem solid var(--border); }
+/* 크기는 board.js 의 fitMain 이 변수로 조절한다:
+   --s 이름·범위 축소(최소 .72) / --g 줄이 적을 때 확대(최대 1.25) / --sec 교재명 축소 / --cols 교재 칸 수 */
+.stu { display: grid; grid-template-columns: calc(24rem * var(--s) * var(--g, 1)) 1fr; align-items: center; padding: calc(1.1rem * var(--s) * var(--g, 1)) 0; border-bottom: .1rem solid var(--border); }
 .stu:last-child { border-bottom: 0; }
-.nm { font-size: calc(6.4rem * var(--s)); font-weight: 800; line-height: 1.05; letter-spacing: -.04em; overflow-wrap: anywhere; }
-.bks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 3.4rem; row-gap: calc(1rem * var(--s)); }
-.bk .l1 { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
-.bk .tt { font-size: calc(2.6rem * var(--s)); font-weight: 500; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.bk .fr { font-size: calc(2.2rem * var(--s)); font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
-.bk .l2 { display: flex; align-items: center; gap: 1.8rem; }
-.bk .rg { font-size: calc(4.6rem * var(--s)); font-weight: 800; line-height: 1.12; letter-spacing: -.03em; white-space: nowrap; }
+.nm { font-size: calc(6.4rem * var(--s) * var(--g, 1)); font-weight: 800; line-height: 1.05; letter-spacing: -.04em; overflow-wrap: anywhere; }
+/* 교재 칸: 교재명(작게) 위에 오늘 범위(크게). 기본 범위 50px, 학생이 적으면 최대 62px */
+.bks { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); column-gap: 3.2rem; row-gap: calc(1.1rem * var(--s) * var(--g, 1)); }
+.bk .tt { font-size: max(2.2rem, calc(2.6rem * var(--sec, 1) * var(--s))); line-height: 1.2; font-weight: 500; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk .rg { font-size: calc(5rem * var(--s) * var(--g, 1)); font-weight: 800; line-height: 1.08; letter-spacing: -.03em; white-space: nowrap; }
 .bk.calc .rg, .calcdemo { color: var(--warn); text-decoration: underline dotted .3rem; text-underline-offset: .8rem; }
-.bar2 { position: relative; flex: 1; min-width: 7rem; height: calc(1.2rem * var(--s)); border-radius: .6rem; background: var(--border); overflow: hidden; }
-.bar2 i { position: absolute; top: 0; bottom: 0; }
-.bar2 .cur { left: 0; background: var(--progress); }
-.bar2 .rec { background: var(--accent); }
+/* 학생이 많을 때: 학생을 2열로 나란히(교재는 학생마다 2칸) */
+.rows.twocol { display: grid; grid-template-columns: 1fr 1fr; column-gap: 3.6rem; }
+.twocol .stu { grid-template-columns: calc(14.5rem * var(--s)) 1fr; }
+.twocol .nm { font-size: calc(5rem * var(--s)); }
+.twocol .bks { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 2.2rem; }
+.more { grid-column: 1 / -1; padding: 1.4rem 0 .8rem; font-size: 2.8rem; font-weight: 700; color: var(--muted); }
 .none { grid-column: 1 / -1; font-size: calc(2.8rem * var(--s)); color: var(--muted); }
 .empty { padding: 4rem 0; font-size: 3.4rem; color: var(--muted); }
 
@@ -82,7 +82,6 @@ body.idle, body.idle * { cursor: none !important; } /* 3초간 입력이 없으�
 .chip { font-size: 2.8rem; font-weight: 700; padding: .3rem 1.6rem; border-radius: 99rem; background: var(--accent-soft); color: var(--accent); border: .1rem solid color-mix(in srgb, var(--accent) 25%, transparent); }
 .legend { display: flex; flex-direction: column; gap: .6rem; font-size: 1.8rem; color: var(--muted); align-items: flex-start; }
 .legend span { display: inline-flex; align-items: center; gap: .8rem; }
-.legend i { width: 2.6rem; height: .9rem; border-radius: .5rem; display: inline-block; }
 
 /* 전체 안내 */
 .big { margin: auto; text-align: center; font-size: 11rem; font-weight: 800; line-height: 1.15; letter-spacing: -.03em; }
